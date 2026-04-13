@@ -8,14 +8,14 @@ CREATE EXTENSION IF NOT EXISTS "vector";      -- pgvector
 -- Layer 4: Multi-User & Auth
 -- ============================================================
 
-CREATE TABLE organizations (
+CREATE TABLE IF NOT EXISTS organizations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
     settings JSONB DEFAULT '{}',
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email TEXT UNIQUE NOT NULL,
     display_name TEXT NOT NULL,
@@ -28,7 +28,7 @@ CREATE TABLE users (
     last_login_at TIMESTAMPTZ
 );
 
-CREATE TABLE api_keys (
+CREATE TABLE IF NOT EXISTS api_keys (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id),
     key_hash TEXT NOT NULL,       -- Argon2id hash
@@ -45,7 +45,7 @@ CREATE TABLE api_keys (
 -- Retention & Compliance (referenced by many tables)
 -- ============================================================
 
-CREATE TABLE retention_policies (
+CREATE TABLE IF NOT EXISTS retention_policies (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
     description TEXT,
@@ -60,7 +60,7 @@ CREATE TABLE retention_policies (
     created_by UUID REFERENCES users(id)
 );
 
-CREATE TABLE legal_holds (
+CREATE TABLE IF NOT EXISTS legal_holds (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
     description TEXT,
@@ -72,7 +72,7 @@ CREATE TABLE legal_holds (
     is_active BOOLEAN DEFAULT TRUE
 );
 
-CREATE TABLE retention_schedule (
+CREATE TABLE IF NOT EXISTS retention_schedule (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     policy_id UUID NOT NULL REFERENCES retention_policies(id),
     record_type TEXT NOT NULL,
@@ -91,7 +91,7 @@ CREATE TABLE retention_schedule (
 -- Conversations & Messages (partitioned by month)
 -- ============================================================
 
-CREATE TABLE conversations (
+CREATE TABLE IF NOT EXISTS conversations (
     id UUID NOT NULL DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id),
     agent_id TEXT,
@@ -111,15 +111,15 @@ CREATE TABLE conversations (
 ) PARTITION BY RANGE (started_at);
 
 -- Create initial partitions (one per month, extend as needed)
-CREATE TABLE conversations_2026_04 PARTITION OF conversations
+CREATE TABLE IF NOT EXISTS conversations_2026_04 PARTITION OF conversations
     FOR VALUES FROM ('2026-04-01') TO ('2026-05-01');
-CREATE TABLE conversations_2026_05 PARTITION OF conversations
+CREATE TABLE IF NOT EXISTS conversations_2026_05 PARTITION OF conversations
     FOR VALUES FROM ('2026-05-01') TO ('2026-06-01');
-CREATE TABLE conversations_2026_06 PARTITION OF conversations
+CREATE TABLE IF NOT EXISTS conversations_2026_06 PARTITION OF conversations
     FOR VALUES FROM ('2026-06-01') TO ('2026-07-01');
-CREATE TABLE conversations_default PARTITION OF conversations DEFAULT;
+CREATE TABLE IF NOT EXISTS conversations_default PARTITION OF conversations DEFAULT;
 
-CREATE TABLE messages (
+CREATE TABLE IF NOT EXISTS messages (
     id UUID NOT NULL DEFAULT gen_random_uuid(),
     conversation_id UUID NOT NULL,
     role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system', 'tool')),
@@ -135,22 +135,22 @@ CREATE TABLE messages (
     PRIMARY KEY (id, created_at)
 ) PARTITION BY RANGE (created_at);
 
-CREATE TABLE messages_2026_04 PARTITION OF messages
+CREATE TABLE IF NOT EXISTS messages_2026_04 PARTITION OF messages
     FOR VALUES FROM ('2026-04-01') TO ('2026-05-01');
-CREATE TABLE messages_2026_05 PARTITION OF messages
+CREATE TABLE IF NOT EXISTS messages_2026_05 PARTITION OF messages
     FOR VALUES FROM ('2026-05-01') TO ('2026-06-01');
-CREATE TABLE messages_2026_06 PARTITION OF messages
+CREATE TABLE IF NOT EXISTS messages_2026_06 PARTITION OF messages
     FOR VALUES FROM ('2026-06-01') TO ('2026-07-01');
-CREATE TABLE messages_default PARTITION OF messages DEFAULT;
+CREATE TABLE IF NOT EXISTS messages_default PARTITION OF messages DEFAULT;
 
-CREATE INDEX idx_messages_fts ON messages USING gin (search_vector);
-CREATE INDEX idx_messages_conversation ON messages (conversation_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_messages_fts ON messages USING gin (search_vector);
+CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages (conversation_id, created_at);
 
 -- ============================================================
 -- Memory System
 -- ============================================================
 
-CREATE TABLE memories (
+CREATE TABLE IF NOT EXISTS memories (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id),
     org_id UUID REFERENCES organizations(id),
@@ -169,15 +169,15 @@ CREATE TABLE memories (
     search_vector tsvector GENERATED ALWAYS AS (to_tsvector('english', content)) STORED
 );
 
-CREATE INDEX idx_memories_embedding ON memories USING hnsw (embedding vector_cosine_ops);
-CREATE INDEX idx_memories_fts ON memories USING gin (search_vector);
-CREATE INDEX idx_memories_user_scope ON memories (user_id, scope) WHERE NOT is_deleted;
+CREATE INDEX IF NOT EXISTS idx_memories_embedding ON memories USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_memories_fts ON memories USING gin (search_vector);
+CREATE INDEX IF NOT EXISTS idx_memories_user_scope ON memories (user_id, scope) WHERE NOT is_deleted;
 
 -- ============================================================
 -- User Profiles (Tier 6: User Model)
 -- ============================================================
 
-CREATE TABLE user_profiles (
+CREATE TABLE IF NOT EXISTS user_profiles (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL UNIQUE REFERENCES users(id),
     profile_data JSONB NOT NULL DEFAULT '{}',
@@ -190,7 +190,7 @@ CREATE TABLE user_profiles (
 -- Skills (Tier 5: Procedural Memory)
 -- ============================================================
 
-CREATE TABLE skills (
+CREATE TABLE IF NOT EXISTS skills (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
     description TEXT,
@@ -212,14 +212,14 @@ CREATE TABLE skills (
     ) STORED
 );
 
-CREATE INDEX idx_skills_embedding ON skills USING hnsw (content_embedding vector_cosine_ops);
-CREATE INDEX idx_skills_fts ON skills USING gin (search_vector);
+CREATE INDEX IF NOT EXISTS idx_skills_embedding ON skills USING hnsw (content_embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_skills_fts ON skills USING gin (search_vector);
 
 -- ============================================================
 -- Document Workspace
 -- ============================================================
 
-CREATE TABLE workspaces (
+CREATE TABLE IF NOT EXISTS workspaces (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID REFERENCES organizations(id),
     name TEXT NOT NULL,
@@ -232,7 +232,7 @@ CREATE TABLE workspaces (
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE TABLE documents (
+CREATE TABLE IF NOT EXISTS documents (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspaces(id),
     user_id UUID NOT NULL REFERENCES users(id),
@@ -254,15 +254,15 @@ CREATE TABLE documents (
     ) STORED
 );
 
-CREATE INDEX idx_documents_fts ON documents USING gin (search_vector);
-CREATE INDEX idx_documents_embedding ON documents USING hnsw (content_embedding vector_cosine_ops);
-CREATE INDEX idx_documents_workspace ON documents (workspace_id) WHERE NOT is_deleted;
+CREATE INDEX IF NOT EXISTS idx_documents_fts ON documents USING gin (search_vector);
+CREATE INDEX IF NOT EXISTS idx_documents_embedding ON documents USING hnsw (content_embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_documents_workspace ON documents (workspace_id) WHERE NOT is_deleted;
 
 -- ============================================================
 -- Scheduling
 -- ============================================================
 
-CREATE TABLE schedules (
+CREATE TABLE IF NOT EXISTS schedules (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id),
     agent_id TEXT NOT NULL,
@@ -283,7 +283,7 @@ CREATE TABLE schedules (
     retention_policy_id UUID REFERENCES retention_policies(id)
 );
 
-CREATE TABLE schedule_runs (
+CREATE TABLE IF NOT EXISTS schedule_runs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     schedule_id UUID NOT NULL REFERENCES schedules(id),
     started_at TIMESTAMPTZ DEFAULT now(),
@@ -300,7 +300,7 @@ CREATE TABLE schedule_runs (
 -- Audit Log (append-only, partitioned by month)
 -- ============================================================
 
-CREATE TABLE audit_log (
+CREATE TABLE IF NOT EXISTS audit_log (
     id UUID NOT NULL DEFAULT gen_random_uuid(),
     timestamp TIMESTAMPTZ DEFAULT now(),
     event_type TEXT NOT NULL,
@@ -317,15 +317,15 @@ CREATE TABLE audit_log (
     PRIMARY KEY (id, timestamp)
 ) PARTITION BY RANGE (timestamp);
 
-CREATE TABLE audit_log_2026_04 PARTITION OF audit_log
+CREATE TABLE IF NOT EXISTS audit_log_2026_04 PARTITION OF audit_log
     FOR VALUES FROM ('2026-04-01') TO ('2026-05-01');
-CREATE TABLE audit_log_2026_05 PARTITION OF audit_log
+CREATE TABLE IF NOT EXISTS audit_log_2026_05 PARTITION OF audit_log
     FOR VALUES FROM ('2026-05-01') TO ('2026-06-01');
-CREATE TABLE audit_log_2026_06 PARTITION OF audit_log
+CREATE TABLE IF NOT EXISTS audit_log_2026_06 PARTITION OF audit_log
     FOR VALUES FROM ('2026-06-01') TO ('2026-07-01');
-CREATE TABLE audit_log_default PARTITION OF audit_log DEFAULT;
+CREATE TABLE IF NOT EXISTS audit_log_default PARTITION OF audit_log DEFAULT;
 
-CREATE INDEX idx_audit_timestamp ON audit_log (timestamp);
-CREATE INDEX idx_audit_user ON audit_log (user_id, timestamp);
-CREATE INDEX idx_audit_type ON audit_log (event_type, timestamp);
-CREATE INDEX idx_audit_conversation ON audit_log (conversation_id) WHERE conversation_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log (timestamp);
+CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log (user_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_audit_type ON audit_log (event_type, timestamp);
+CREATE INDEX IF NOT EXISTS idx_audit_conversation ON audit_log (conversation_id) WHERE conversation_id IS NOT NULL;
