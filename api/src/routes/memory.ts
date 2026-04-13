@@ -24,6 +24,29 @@ app.get("/", async (c) => {
   return c.json({ memories });
 });
 
+// POST /api/v1/memory/search — search memories (frontend uses this)
+app.post("/search", async (c) => {
+  const user = c.get("user");
+  const body = await c.req.json<{
+    query: string;
+    scope?: string;
+    limit?: number;
+  }>();
+
+  if (!body.query) {
+    return c.json({ error: "query is required" }, 400);
+  }
+
+  const memories = await core.searchMemory({
+    user_id: user.id,
+    query: body.query,
+    scope: (body.scope ?? "personal") as "personal" | "shared" | "org",
+    limit: body.limit ?? 10,
+  });
+
+  return c.json(memories);
+});
+
 // POST /api/v1/memory — store memory
 app.post("/", async (c) => {
   const user = c.get("user");

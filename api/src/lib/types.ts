@@ -2,6 +2,7 @@
 export interface AuthUser {
   id: string;
   email: string;
+  display_name?: string;
   role: "admin" | "member" | "viewer";
   org_id?: string;
 }

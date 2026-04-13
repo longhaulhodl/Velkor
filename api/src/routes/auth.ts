@@ -31,6 +31,7 @@ app.post("/login", async (c) => {
     id: string;
     email: string;
     password_hash: string;
+    display_name?: string;
     role: string;
     org_id?: string;
   };
@@ -41,9 +42,11 @@ app.post("/login", async (c) => {
     return c.json({ error: "Invalid email or password" }, 401);
   }
 
+  const displayName = user.display_name ?? user.email;
   const authUser: AuthUser = {
     id: user.id,
     email: user.email,
+    display_name: displayName,
     role: user.role as AuthUser["role"],
     org_id: user.org_id,
   };
@@ -54,7 +57,7 @@ app.post("/login", async (c) => {
   return c.json({
     token,
     refresh_token: refreshToken,
-    user: { id: user.id, email: user.email, role: user.role },
+    user: { id: user.id, email: user.email, display_name: displayName, role: user.role },
   });
 });
 
@@ -96,19 +99,23 @@ app.post("/register", async (c) => {
     return c.json({ error: `Registration failed: ${errBody}` }, 500 as const);
   }
 
-  const user = (await resp.json()) as { id: string; email: string; role: string };
+  const user = (await resp.json()) as { id: string; email: string; display_name?: string; role: string };
+  const displayName = user.display_name ?? user.email;
 
   const authUser: AuthUser = {
     id: user.id,
     email: user.email,
+    display_name: displayName,
     role: user.role as AuthUser["role"],
   };
 
   const token = signToken(authUser);
+  const refreshToken = signToken(authUser, "7d");
 
   return c.json({
     token,
-    user: { id: user.id, email: user.email, role: user.role },
+    refresh_token: refreshToken,
+    user: { id: user.id, email: user.email, display_name: user.display_name ?? user.email, role: user.role },
   }, 201);
 });
 

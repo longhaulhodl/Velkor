@@ -27,7 +27,7 @@ export const api = {
   register: (email: string, password: string, display_name: string) =>
     request<{ token: string; user: User }>('/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ email, password, display_name }),
+      body: JSON.stringify({ email, password, name: display_name }),
     }),
 
   me: async () => {

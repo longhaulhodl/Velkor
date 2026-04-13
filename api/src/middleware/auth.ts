@@ -30,6 +30,7 @@ export const authMiddleware = createMiddleware(async (c, next) => {
     c.set("user", {
       id: payload.id,
       email: payload.email,
+      display_name: payload.display_name,
       role: payload.role,
       org_id: payload.org_id,
     });
@@ -62,7 +63,7 @@ export function requireRole(minRole: "admin" | "member" | "viewer") {
 /** Sign a JWT for a user. */
 export function signToken(user: AuthUser, expiresIn: string = "24h"): string {
   return jwt.sign(
-    { id: user.id, email: user.email, role: user.role, org_id: user.org_id },
+    { id: user.id, email: user.email, display_name: user.display_name, role: user.role, org_id: user.org_id },
     JWT_SECRET,
     { expiresIn: expiresIn as jwt.SignOptions["expiresIn"] }
   );
@@ -72,7 +73,7 @@ export function signToken(user: AuthUser, expiresIn: string = "24h"): string {
 export function verifyToken(token: string): AuthUser | null {
   try {
     const payload = jwt.verify(token, JWT_SECRET) as AuthUser;
-    return { id: payload.id, email: payload.email, role: payload.role, org_id: payload.org_id };
+    return { id: payload.id, email: payload.email, display_name: payload.display_name, role: payload.role, org_id: payload.org_id };
   } catch {
     return null;
   }

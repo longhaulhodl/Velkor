@@ -29,7 +29,7 @@ async fn create_user(
         r#"
         INSERT INTO users (email, password_hash, display_name, role)
         VALUES ($1, $2, $3, 'member')
-        RETURNING id, email, role
+        RETURNING id, email, display_name, role
         "#,
     )
     .bind(&req.email)
@@ -50,6 +50,7 @@ async fn create_user(
         Json(serde_json::json!({
             "id": row.id,
             "email": row.email,
+            "display_name": row.display_name,
             "role": row.role,
         })),
     ))
@@ -61,7 +62,7 @@ async fn get_by_email(
 ) -> Result<Json<serde_json::Value>, axum::http::StatusCode> {
     let row = sqlx::query_as::<_, UserWithHashRow>(
         r#"
-        SELECT id, email, password_hash, role, org_id
+        SELECT id, email, password_hash, display_name, role, org_id
         FROM users
         WHERE email = $1 AND is_active = TRUE
         "#,
@@ -76,6 +77,7 @@ async fn get_by_email(
         "id": row.id,
         "email": row.email,
         "password_hash": row.password_hash,
+        "display_name": row.display_name,
         "role": row.role,
         "org_id": row.org_id,
     })))
@@ -85,6 +87,7 @@ async fn get_by_email(
 struct UserRow {
     id: Uuid,
     email: String,
+    display_name: Option<String>,
     role: String,
 }
 
@@ -93,6 +96,7 @@ struct UserWithHashRow {
     id: Uuid,
     email: String,
     password_hash: String,
+    display_name: Option<String>,
     role: String,
     org_id: Option<Uuid>,
 }

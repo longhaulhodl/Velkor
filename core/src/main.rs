@@ -112,8 +112,21 @@ async fn main() -> Result<()> {
     // Build tool registry
     let tools = Arc::new(velkor_tools::registry::ToolRegistry::new());
 
-    // Build agent runtime
-    let runtime_config = velkor_runtime::react::RuntimeConfig::default();
+    // Build agent runtime — use the default model from the first configured provider
+    let default_model = config
+        .routing
+        .as_ref()
+        .and_then(|r| r.fallback_chain.first().cloned())
+        .or_else(|| {
+            config.providers.values().find_map(|p| p.default_model.clone())
+        })
+        .unwrap_or_else(|| "anthropic/claude-sonnet-4-20250514".to_string());
+
+    tracing::info!(model = %default_model, "Default model for agent runtime");
+
+    let mut runtime_config = velkor_runtime::react::RuntimeConfig::default();
+    runtime_config.model = default_model;
+
     let runtime = Arc::new(AgentRuntime::new(
         runtime_config,
         model_router,
