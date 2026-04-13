@@ -2,7 +2,7 @@
  * Interactive setup wizard — the heart of `velkor setup`.
  */
 
-import { execSync } from "node:child_process";
+import { execSync, spawn as nodeSpawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -375,57 +375,92 @@ async function offerDockerUp(
   }
 
   blank();
-  const buildSpinner = ora({
-    text: "Building and starting services (this may take a few minutes on first run)...",
+
+  // ── Step 1: Pull images ──────────────────────────────────────────────
+  const pullSpinner = ora({
+    text: "Pulling container images...",
     color: "magenta",
   }).start();
 
   try {
-    execSync("docker compose up --build -d", {
+    execSync("docker compose pull --quiet 2>/dev/null", {
       cwd: projectRoot,
       stdio: "pipe",
-      timeout: 600_000, // 10 min
+      timeout: 300_000,
     });
-    buildSpinner.succeed(ok("All services started"));
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    buildSpinner.fail(err("Failed to start services"));
-    failure(msg);
-    bullet("Try running " + info("docker compose up --build") + " manually to see full output.");
-    return;
+    pullSpinner.succeed(ok("Images pulled"));
+  } catch {
+    pullSpinner.succeed(ok("Images") + dim(" — using cache / will pull during build"));
   }
 
-  // Wait for API health
-  const healthSpinner = ora({
-    text: "Waiting for API gateway...",
+  // ── Step 2: Build custom images ──────────────────────────────────────
+  const buildOk = await runWithProgress(
+    "Building Rust core, API gateway, and frontend",
+    "docker compose build --progress quiet 2>&1",
+    projectRoot,
+    600_000, // 10 min — Rust compile is slow on first run
+  );
+
+  if (!buildOk) return;
+
+  // ── Step 3: Start services ───────────────────────────────────────────
+  const startSpinner = ora({
+    text: "Starting services...",
     color: "magenta",
   }).start();
 
-  let healthy = false;
-  for (let i = 0; i < 30; i++) {
-    try {
-      execSync("curl -sf http://localhost:3000/health", {
-        stdio: "pipe",
-        timeout: 3000,
-      });
-      healthy = true;
+  try {
+    execSync("docker compose up -d", {
+      cwd: projectRoot,
+      stdio: "pipe",
+      timeout: 60_000,
+    });
+    startSpinner.succeed(ok("Containers started"));
+  } catch (e: unknown) {
+    startSpinner.fail(err("Failed to start containers"));
+    showDockerError(e);
+    return;
+  }
+
+  // ── Step 4: Wait for health ──────────────────────────────────────────
+  const healthSpinner = ora({
+    text: "Waiting for services to become healthy...",
+    color: "magenta",
+  }).start();
+
+  const services = [
+    { name: "PostgreSQL", check: "docker compose exec -T postgres pg_isready -U velkor" },
+    { name: "Redis", check: "docker compose exec -T redis redis-cli ping" },
+    { name: "Core API", check: "curl -sf http://localhost:3001/internal/health" },
+    { name: "API Gateway", check: "curl -sf http://localhost:3000/health" },
+  ];
+
+  let allHealthy = true;
+  for (const svc of services) {
+    let up = false;
+    for (let i = 0; i < 30; i++) {
+      try {
+        execSync(svc.check, { cwd: projectRoot, stdio: "pipe", timeout: 3000 });
+        up = true;
+        break;
+      } catch {
+        healthSpinner.text = `Waiting for ${svc.name}...`;
+        await sleep(2000);
+      }
+    }
+    if (!up) {
+      allHealthy = false;
+      healthSpinner.warn(brand(svc.name) + dim(" — not responding yet"));
       break;
-    } catch {
-      await sleep(2000);
     }
   }
 
-  if (healthy) {
-    healthSpinner.succeed(ok("API gateway") + dim(" — healthy"));
-  } else {
-    healthSpinner.warn(
-      brand("API gateway") +
-        dim(" — not responding yet, may still be starting")
-    );
+  if (allHealthy) {
+    healthSpinner.succeed(ok("All services healthy"));
   }
 
-  // Create admin user if we have credentials
-  if (answers?.adminEmail && answers?.adminPassword && healthy) {
+  // ── Step 5: Create admin user ────────────────────────────────────────
+  if (answers?.adminEmail && answers?.adminPassword && allHealthy) {
     const adminSpinner = ora({
       text: "Creating admin user...",
       color: "magenta",
@@ -453,6 +488,162 @@ async function offerDockerUp(
 
   // ─── Success Screen ─────────────────────────────────────────────────
   showSuccessScreen(answers);
+}
+
+// ---------------------------------------------------------------------------
+// Run a long Docker command with a spinner + elapsed time, parse errors
+// ---------------------------------------------------------------------------
+
+async function runWithProgress(
+  label: string,
+  command: string,
+  cwd: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  const spinner = ora({ text: label + "...", color: "magenta" }).start();
+  const startTime = Date.now();
+
+  // Update spinner with elapsed time
+  const timer = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const min = Math.floor(elapsed / 60);
+    const sec = elapsed % 60;
+    const timeStr = min > 0 ? `${min}m ${sec}s` : `${sec}s`;
+    spinner.text = `${label}... ${dim(`(${timeStr})`)}`;
+  }, 1000);
+
+  return new Promise((resolve) => {
+    const proc = nodeSpawn("sh", ["-c", command], {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    proc.stdout?.on("data", (d: Buffer) => { stdout += d.toString(); });
+    proc.stderr?.on("data", (d: Buffer) => { stderr += d.toString(); });
+
+    const timeout = setTimeout(() => {
+      proc.kill("SIGTERM");
+      clearInterval(timer);
+      spinner.fail(err("Build timed out"));
+      failure(`Build exceeded ${Math.floor(timeoutMs / 60000)} minute limit`);
+      resolve(false);
+    }, timeoutMs);
+
+    proc.on("close", (code) => {
+      clearTimeout(timeout);
+      clearInterval(timer);
+
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      const min = Math.floor(elapsed / 60);
+      const sec = elapsed % 60;
+      const timeStr = min > 0 ? `${min}m ${sec}s` : `${sec}s`;
+
+      if (code === 0) {
+        spinner.succeed(ok("Build complete") + dim(` (${timeStr})`));
+        resolve(true);
+      } else {
+        spinner.fail(err("Build failed"));
+        blank();
+        showBuildError(stdout + stderr);
+        resolve(false);
+      }
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Smart error extraction from Docker build output
+// ---------------------------------------------------------------------------
+
+function showBuildError(output: string) {
+  const lines = output.split("\n");
+
+  // Try to find the most useful error information
+  // Pattern 1: Rust compilation errors
+  const rustError = lines.find((l) => l.includes("error[E") || l.includes("error: aborting"));
+  if (rustError) {
+    section("Rust Compilation Error");
+    // Find all error lines and a few lines of context
+    const errorLines = lines.filter(
+      (l) =>
+        l.includes("error") ||
+        l.includes("requires rustc") ||
+        l.includes("not found") ||
+        l.includes("cannot find")
+    ).slice(0, 10);
+    for (const line of errorLines) {
+      console.log(`  ${err("│")} ${line.trim()}`);
+    }
+    blank();
+    bullet("Fix the error above, then run " + info("docker compose build") + " to retry.");
+    return;
+  }
+
+  // Pattern 2: MSRV / rustc version mismatch
+  const msrvError = lines.find((l) => l.includes("requires rustc"));
+  if (msrvError) {
+    section("Rust Version Error");
+    const versionLines = lines.filter((l) => l.includes("requires rustc")).slice(0, 5);
+    for (const line of versionLines) {
+      console.log(`  ${err("│")} ${line.trim()}`);
+    }
+    blank();
+    bullet("The Dockerfile Rust version needs to be bumped.");
+    bullet("Update " + info("core/Dockerfile") + " to use a newer " + info("rust:<version>-bookworm") + " image.");
+    return;
+  }
+
+  // Pattern 3: Dockerfile / build context errors
+  const dockerError = lines.find(
+    (l) => l.includes("failed to solve") || l.includes("COPY failed") || l.includes("not found in build context")
+  );
+  if (dockerError) {
+    section("Docker Build Error");
+    console.log(`  ${err("│")} ${dockerError.trim()}`);
+    blank();
+    bullet("Check your Dockerfile and ensure all referenced files exist.");
+    return;
+  }
+
+  // Pattern 4: npm / node build errors
+  const npmError = lines.find((l) => l.includes("npm error") || l.includes("ERR!"));
+  if (npmError) {
+    section("Node.js Build Error");
+    const npmLines = lines
+      .filter((l) => l.includes("npm error") || l.includes("ERR!") || l.includes("error TS"))
+      .slice(0, 10);
+    for (const line of npmLines) {
+      console.log(`  ${err("│")} ${line.trim()}`);
+    }
+    blank();
+    bullet("Check the TypeScript / npm error above.");
+    return;
+  }
+
+  // Fallback: show the last meaningful lines
+  section("Build Error");
+  const meaningful = lines
+    .filter((l) => l.trim().length > 0 && !l.startsWith("#") && !l.includes("Pulling") && !l.includes("Waiting"))
+    .slice(-15);
+  for (const line of meaningful) {
+    console.log(`  ${err("│")} ${line.trim()}`);
+  }
+  blank();
+  bullet("Run " + info("docker compose build 2>&1 | tail -50") + " for full output.");
+}
+
+function showDockerError(e: unknown) {
+  const msg = e instanceof Error ? e.message : String(e);
+  const lines = msg.split("\n").filter((l) => l.trim());
+  // Show at most 10 lines
+  for (const line of lines.slice(-10)) {
+    console.log(`  ${err("│")} ${line.trim()}`);
+  }
+  blank();
+  bullet("Run " + info("docker compose up") + " to see full output.");
 }
 
 function showSuccessScreen(answers?: WizardAnswers) {
