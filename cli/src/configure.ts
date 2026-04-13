@@ -153,14 +153,34 @@ async function configureLlm(
     ],
   });
 
-  // Clear old provider keys
-  envLines = envLines.filter(
-    (l) =>
-      !l.startsWith("OPENROUTER_API_KEY=") &&
-      !l.startsWith("ANTHROPIC_API_KEY=") &&
-      !l.startsWith("OPENAI_API_KEY=") &&
-      !l.startsWith("CUSTOM_LLM_API_KEY=")
-  );
+  // Clear only the LLM provider key being replaced — preserve keys used by
+  // other subsystems (e.g. OPENAI_API_KEY used for embeddings).
+  const llmKeyMap: Record<string, string> = {
+    openrouter: "OPENROUTER_API_KEY",
+    anthropic: "ANTHROPIC_API_KEY",
+    openai: "OPENAI_API_KEY",
+    custom: "CUSTOM_LLM_API_KEY",
+  };
+  // Remove the key for the newly selected provider (we'll re-add it below)
+  const newKeyName = llmKeyMap[provider];
+  if (newKeyName) {
+    envLines = envLines.filter((l) => !l.startsWith(`${newKeyName}=`));
+  }
+  // Also remove keys for providers we're no longer using as LLM providers,
+  // BUT only if they aren't needed for embeddings
+  const mem = config.memory as Record<string, unknown> | undefined;
+  const embeddingModel = String(mem?.embedding_model ?? "");
+  for (const [prov, keyName] of Object.entries(llmKeyMap)) {
+    if (prov === provider) continue; // already handled above
+    if (prov === "openai" && embeddingModel.startsWith("openai/")) continue;
+    if (prov === "ollama") continue; // no key to remove
+    // Don't remove keys that may still be needed
+    // Only remove if this provider was the *previous* LLM provider
+    const existingProviders = (config.providers ?? {}) as Record<string, Record<string, string>>;
+    if (existingProviders[prov] && !embeddingModel.startsWith(`${prov}/`)) {
+      envLines = envLines.filter((l) => !l.startsWith(`${keyName}=`));
+    }
+  }
 
   const providers: Record<string, Record<string, string>> = {};
 
