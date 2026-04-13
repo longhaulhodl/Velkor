@@ -30,7 +30,10 @@ export const api = {
       body: JSON.stringify({ email, password, display_name }),
     }),
 
-  me: () => request<User>('/auth/me'),
+  me: async () => {
+    const res = await request<{ user: User }>('/auth/me');
+    return res.user;
+  },
 
   // Conversations
   listConversations: (limit = 50, offset = 0) =>

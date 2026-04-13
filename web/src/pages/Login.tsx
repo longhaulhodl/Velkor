@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/auth';
 
 export default function Login() {
@@ -6,7 +7,8 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
-  const { login, register, loading, error } = useAuthStore();
+  const { login, register, loading, error, token } = useAuthStore();
+  const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -14,6 +16,10 @@ export default function Login() {
       await register(email, password, displayName);
     } else {
       await login(email, password);
+    }
+    // If login/register succeeded (token is now set), navigate to chat
+    if (useAuthStore.getState().token) {
+      navigate('/', { replace: true });
     }
   };
 
