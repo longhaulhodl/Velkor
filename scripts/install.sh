@@ -5,6 +5,9 @@
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/longhaulhodl/Velkor/main/scripts/install.sh | bash
 #
+# Custom install directory:
+#   export VELKOR_DIR=~/my-velkor && curl -fsSL https://raw.githubusercontent.com/longhaulhodl/Velkor/main/scripts/install.sh | bash
+#
 # What it does:
 #   1. Checks prerequisites (git, node, docker)
 #   2. Clones the repo (or pulls if already cloned)
@@ -18,13 +21,13 @@ set -euo pipefail
 # Colors (matching the Velkor brand: violet primary, amber accent)
 # ---------------------------------------------------------------------------
 
-VIOLET='\033[38;5;135m'
-AMBER='\033[38;5;214m'
-GREEN='\033[38;5;77m'
-RED='\033[38;5;203m'
-DIM='\033[2m'
-BOLD='\033[1m'
-RESET='\033[0m'
+VIOLET=$'\033[38;5;135m'
+AMBER=$'\033[38;5;214m'
+GREEN=$'\033[38;5;77m'
+RED=$'\033[38;5;203m'
+DIM=$'\033[2m'
+BOLD=$'\033[1m'
+RESET=$'\033[0m'
 
 # ---------------------------------------------------------------------------
 # Helpers
