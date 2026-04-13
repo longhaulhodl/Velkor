@@ -413,7 +413,7 @@ async function offerDockerUp(
     execSync("docker compose up -d", {
       cwd: projectRoot,
       stdio: "pipe",
-      timeout: 60_000,
+      timeout: 180_000,
     });
     startSpinner.succeed(ok("Containers started"));
   } catch (e: unknown) {

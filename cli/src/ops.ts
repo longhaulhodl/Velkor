@@ -42,7 +42,7 @@ export async function runStart(root: string) {
   const spinner = ora({ text: "Starting containers...", color: "magenta" }).start();
 
   try {
-    execSync("docker compose up -d", { cwd: root, stdio: "pipe", timeout: 60_000 });
+    execSync("docker compose up -d", { cwd: root, stdio: "pipe", timeout: 180_000 });
     spinner.succeed(ok("All containers started"));
   } catch (e) {
     spinner.fail(err("Failed to start containers"));
@@ -111,7 +111,7 @@ export async function runRestart(root: string) {
   // Start
   const startSpinner = ora({ text: "Starting containers...", color: "magenta" }).start();
   try {
-    execSync("docker compose up -d", { cwd: root, stdio: "pipe", timeout: 60_000 });
+    execSync("docker compose up -d", { cwd: root, stdio: "pipe", timeout: 180_000 });
     startSpinner.succeed(ok("All containers started"));
   } catch {
     startSpinner.fail(err("Failed to start containers"));
@@ -278,7 +278,7 @@ export async function runUpdate(root: string) {
   // Step 4: Restart
   const restartSpinner = ora({ text: "Restarting services...", color: "magenta" }).start();
   try {
-    execSync("docker compose up -d", { cwd: root, stdio: "pipe", timeout: 60_000 });
+    execSync("docker compose up -d", { cwd: root, stdio: "pipe", timeout: 180_000 });
     restartSpinner.succeed(ok("Services restarted"));
   } catch {
     restartSpinner.fail(err("Failed to restart"));
