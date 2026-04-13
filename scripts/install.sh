@@ -166,6 +166,10 @@ install_cli() {
   # Build TypeScript
   npx tsc 2>/dev/null
   ok "CLI built"
+
+  # Register 'velkor' as a global command
+  npm link --silent 2>/dev/null
+  ok "velkor command registered globally"
   echo ""
 }
 

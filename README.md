@@ -37,7 +37,7 @@ irm https://raw.githubusercontent.com/longhaulhodl/Velkor/main/scripts/install.p
 
 1. Checks prerequisites (git, Node.js, Docker, Docker Compose)
 2. Clones the repository to `~/velkor` (override with `VELKOR_DIR`)
-3. Installs and builds the CLI
+3. Installs the CLI and registers `velkor` as a global command
 4. Launches the interactive setup wizard
 
 The wizard walks you through:
@@ -47,13 +47,23 @@ The wizard walks you through:
 - Creating your admin account
 - Starting all services with Docker Compose
 
+After install, `velkor` is available as a global command:
+
+```bash
+velkor setup                          # Run the setup wizard again
+velkor configure                      # Reconfigure a section interactively
+velkor configure --section llm        # Change LLM provider
+velkor configure --section embeddings # Change embedding provider
+velkor configure --section web-search # Change search provider
+```
+
 ### Manual install
 
 ```bash
 git clone https://github.com/longhaulhodl/Velkor.git
-cd velkor
-cd cli && npm install && npx tsc && cd ..
-node cli/dist/index.js setup
+cd Velkor
+cd cli && npm install && npx tsc && npm link && cd ..
+velkor setup
 ```
 
 ---

@@ -153,6 +153,9 @@ function Install-Cli {
 
     npx tsc 2>$null
     Write-Ok "CLI built"
+
+    npm link --silent 2>$null
+    Write-Ok "velkor command registered globally"
     Pop-Location
 
     Write-Host ""
