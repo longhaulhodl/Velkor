@@ -36,11 +36,15 @@ export const api = {
   },
 
   // Conversations
-  listConversations: (limit = 50, offset = 0) =>
-    request<Conversation[]>(`/conversations?limit=${limit}&offset=${offset}`),
+  listConversations: async (limit = 50, offset = 0) => {
+    const res = await request<{ conversations: Conversation[] }>(`/conversations?limit=${limit}&offset=${offset}`);
+    return res.conversations;
+  },
 
-  getConversation: (id: string) =>
-    request<ConversationDetail>(`/conversations/${id}`),
+  getConversation: async (id: string) => {
+    const res = await request<{ conversation: ConversationDetail }>(`/conversations/${id}`);
+    return res.conversation;
+  },
 
   deleteConversation: (id: string) =>
     request<void>(`/conversations/${id}`, { method: 'DELETE' }),
