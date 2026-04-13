@@ -13,7 +13,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", post(store_memory))
         .route("/search", post(search_memory))
-        .route("/{id}", get(get_memory).put(update_memory).delete(delete_memory))
+        .route("/:id", get(get_memory).put(update_memory).delete(delete_memory))
 }
 
 #[derive(Deserialize)]

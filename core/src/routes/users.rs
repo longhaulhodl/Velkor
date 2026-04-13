@@ -11,7 +11,7 @@ use crate::AppState;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", post(create_user))
-        .route("/by-email/{email}", get(get_by_email))
+        .route("/by-email/:email", get(get_by_email))
 }
 
 #[derive(Deserialize)]

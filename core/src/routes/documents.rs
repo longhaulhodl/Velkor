@@ -11,7 +11,7 @@ use crate::AppState;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_documents))
-        .route("/{id}", get(get_document).delete(delete_document))
+        .route("/:id", get(get_document).delete(delete_document))
 }
 
 #[derive(Deserialize)]
