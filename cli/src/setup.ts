@@ -663,15 +663,27 @@ function showSuccessScreen(answers?: WizardAnswers) {
   }
 
   lines.push("");
+  lines.push(bright("Useful commands:"));
   lines.push(
-    dim("Run ") +
-      info("docker compose logs -f") +
-      dim(" to watch logs")
+    `  ${info("velkor start")}      ${dim("Start all services")}`
   );
   lines.push(
-    dim("Run ") +
-      info("velkor configure") +
-      dim(" to change settings")
+    `  ${info("velkor stop")}       ${dim("Stop all services")}`
+  );
+  lines.push(
+    `  ${info("velkor restart")}    ${dim("Rebuild and restart")}`
+  );
+  lines.push(
+    `  ${info("velkor status")}     ${dim("Check service health")}`
+  );
+  lines.push(
+    `  ${info("velkor logs")}       ${dim("Tail logs (Ctrl+C to exit)")}`
+  );
+  lines.push(
+    `  ${info("velkor update")}     ${dim("Pull latest and rebuild")}`
+  );
+  lines.push(
+    `  ${info("velkor configure")}  ${dim("Change LLM, search, etc.")}`
   );
 
   successBox(lines);
