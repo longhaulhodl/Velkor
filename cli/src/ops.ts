@@ -255,7 +255,7 @@ export async function runUpdate(root: string) {
   // Step 2: Rebuild CLI
   const cliSpinner = ora({ text: "Rebuilding CLI...", color: "magenta" }).start();
   try {
-    execSync("npm install && npx tsc", {
+    execSync("npm install && npx tsc && chmod +x dist/index.js", {
       cwd: resolve(root, "cli"),
       stdio: "pipe",
       timeout: 60_000,
