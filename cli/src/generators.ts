@@ -285,14 +285,14 @@ export function generateConfig(
 
   switch (answers.searchProvider) {
     case "tavily":
-      toolsSearch.tavily_api_key = "${TAVILY_API_KEY}";
+      toolsSearch.tavily_api_key = "${TAVILY_API_KEY:-}";
       break;
     case "brave":
-      toolsSearch.brave_api_key = "${BRAVE_API_KEY}";
+      toolsSearch.brave_api_key = "${BRAVE_API_KEY:-}";
       break;
     case "perplexity":
       toolsSearch.perplexity = {
-        api_key: "${PERPLEXITY_API_KEY}",
+        api_key: "${PERPLEXITY_API_KEY:-}",
       };
       break;
   }

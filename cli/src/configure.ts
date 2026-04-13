@@ -384,7 +384,7 @@ async function configureWebSearch(
       mask: "•",
     });
     envLines.push(`PERPLEXITY_API_KEY=${apiKey}`);
-    webSearch.perplexity = { api_key: "${PERPLEXITY_API_KEY}" };
+    webSearch.perplexity = { api_key: "${PERPLEXITY_API_KEY:-}" };
     success("Perplexity " + dim("configured"));
   } else if (provider === "tavily") {
     const apiKey = await password({
@@ -392,7 +392,7 @@ async function configureWebSearch(
       mask: "•",
     });
     envLines.push(`TAVILY_API_KEY=${apiKey}`);
-    webSearch.tavily_api_key = "${TAVILY_API_KEY}";
+    webSearch.tavily_api_key = "${TAVILY_API_KEY:-}";
     success("Tavily " + dim("configured"));
   } else if (provider === "brave") {
     const apiKey = await password({
@@ -400,7 +400,7 @@ async function configureWebSearch(
       mask: "•",
     });
     envLines.push(`BRAVE_API_KEY=${apiKey}`);
-    webSearch.brave_api_key = "${BRAVE_API_KEY}";
+    webSearch.brave_api_key = "${BRAVE_API_KEY:-}";
     success("Brave Search " + dim("configured"));
   } else if (provider === "duckduckgo") {
     success("DuckDuckGo " + dim("— no key needed"));
