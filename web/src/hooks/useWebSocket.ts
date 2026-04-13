@@ -5,15 +5,18 @@ import { useAuthStore } from '../stores/auth';
 interface WsMessage {
   type: string;
   text?: string;
+  content?: string;
   tool?: string;
   status?: 'started' | 'completed' | 'failed';
   result?: string;
   conversation_id?: string;
   error?: string;
+  message?: string;
 }
 
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
+  const pendingRef = useRef<string | null>(null);
   const token = useAuthStore((s) => s.token);
   const {
     appendStreamText,
@@ -26,18 +29,41 @@ export function useWebSocket() {
   } = useChatStore();
 
   const connect = useCallback(() => {
-    if (!token || wsRef.current?.readyState === WebSocket.OPEN) return;
+    if (!token) return;
+
+    // Already open or connecting — don't create a second socket
+    if (
+      wsRef.current &&
+      (wsRef.current.readyState === WebSocket.OPEN ||
+        wsRef.current.readyState === WebSocket.CONNECTING)
+    ) {
+      return;
+    }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws?token=${token}`);
     wsRef.current = ws;
 
+    ws.onopen = () => {
+      console.log('[Velkor] WebSocket connected');
+      // If there's a pending message queued before the socket opened, send it now
+      if (pendingRef.current) {
+        ws.send(pendingRef.current);
+        pendingRef.current = null;
+      }
+    };
+
     ws.onmessage = (event) => {
-      const msg: WsMessage = JSON.parse(event.data);
+      let msg: WsMessage;
+      try {
+        msg = JSON.parse(event.data);
+      } catch {
+        return;
+      }
 
       switch (msg.type) {
         case 'text':
-          appendStreamText(msg.text ?? '');
+          appendStreamText(msg.text ?? msg.content ?? '');
           break;
         case 'tool_status':
           setToolStatus({
@@ -54,42 +80,51 @@ export function useWebSocket() {
           if (msg.conversation_id) setConversationId(msg.conversation_id);
           break;
         case 'error':
-          setError(msg.error ?? 'Unknown error');
+          setError(msg.error ?? msg.message ?? 'Unknown error');
           setStreaming(false);
           break;
       }
     };
 
-    ws.onerror = () => {
+    ws.onerror = (event) => {
+      console.error('[Velkor] WebSocket error:', event);
       setError('WebSocket connection error');
       setStreaming(false);
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
+      console.log(`[Velkor] WebSocket closed: code=${event.code} reason=${event.reason}`);
       wsRef.current = null;
     };
   }, [token, appendStreamText, finalizeAssistantMessage, setToolStatus, clearActiveTools, setStreaming, setConversationId, setError]);
 
   const sendMessage = useCallback(
     (content: string, conversationId?: string | null) => {
-      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-        connect();
-        // Retry after connection opens
-        setTimeout(() => sendMessage(content, conversationId), 500);
-        return;
-      }
+      const payload = JSON.stringify({
+        type: 'chat',
+        content,
+        conversation_id: conversationId ?? undefined,
+      });
 
       setStreaming(true);
       setError(null);
       clearActiveTools();
 
-      wsRef.current.send(
-        JSON.stringify({
-          type: 'chat',
-          content,
-          conversation_id: conversationId ?? undefined,
-        })
-      );
+      const ws = wsRef.current;
+
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        // Socket is ready — send immediately
+        ws.send(payload);
+      } else if (ws && ws.readyState === WebSocket.CONNECTING) {
+        // Socket is still connecting — queue the message for onopen
+        console.log('[Velkor] WebSocket connecting, queuing message...');
+        pendingRef.current = payload;
+      } else {
+        // No socket — connect and queue
+        console.log('[Velkor] WebSocket not connected, connecting and queuing message...');
+        pendingRef.current = payload;
+        connect();
+      }
     },
     [connect, setStreaming, setError, clearActiveTools]
   );
@@ -99,7 +134,7 @@ export function useWebSocket() {
     wsRef.current = null;
   }, []);
 
-  // Auto-connect when token available
+  // Auto-connect when token is available
   useEffect(() => {
     if (token) connect();
     return () => disconnect();
