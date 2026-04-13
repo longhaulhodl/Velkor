@@ -1,7 +1,7 @@
 # ---------------------------------------------------------------------------
 # Velkor Core — multi-stage Rust build
 # ---------------------------------------------------------------------------
-FROM rust:1.87-bookworm AS builder
+FROM rust:1.92-bookworm AS builder
 
 WORKDIR /build
 
