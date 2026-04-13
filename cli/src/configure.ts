@@ -10,7 +10,7 @@
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { select, search, input, password } from "@inquirer/prompts";
+import { select, search, input, password, confirm } from "@inquirer/prompts";
 import ora from "ora";
 import { parse, stringify } from "yaml";
 
@@ -416,10 +416,30 @@ async function configureWebSearch(
   };
 
   if (provider === "perplexity") {
-    const apiKey = await password({
-      message: brand("Perplexity API key (pplx-... or sk-or-...):"),
-      mask: "•",
-    });
+    // Check if OpenRouter key already exists — it routes Perplexity models too
+    const orLine = envLines.find((l) => l.startsWith("OPENROUTER_API_KEY="));
+    const existingOrKey = orLine?.split("=").slice(1).join("=");
+    let apiKey: string;
+
+    if (existingOrKey) {
+      const reuse = await confirm({
+        message: brand("Use your existing OpenRouter key for Perplexity search?"),
+        default: true,
+      });
+      if (reuse) {
+        apiKey = existingOrKey;
+      } else {
+        apiKey = await password({
+          message: brand("Perplexity API key (pplx-...):"),
+          mask: "•",
+        });
+      }
+    } else {
+      apiKey = await password({
+        message: brand("Perplexity API key (pplx-... or sk-or-...):"),
+        mask: "•",
+      });
+    }
     envLines.push(`PERPLEXITY_API_KEY=${apiKey}`);
 
     const searchModel = await select({
