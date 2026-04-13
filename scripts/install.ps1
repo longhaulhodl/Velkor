@@ -2,7 +2,7 @@
 # Velkor — One-line installer for Windows (PowerShell)
 #
 # Usage:
-#   irm https://raw.githubusercontent.com/maxheld/velkor/main/scripts/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/longhaulhodl/Velkor/main/scripts/install.ps1 | iex
 #
 # What it does:
 #   1. Checks prerequisites (git, node, docker)
@@ -118,7 +118,7 @@ function Assert-Prerequisites {
 # Clone or update
 # ---------------------------------------------------------------------------
 
-$RepoUrl = "https://github.com/maxheld/velkor.git"
+$RepoUrl = "https://github.com/longhaulhodl/Velkor.git"
 $InstallDir = if ($env:VELKOR_DIR) { $env:VELKOR_DIR } else { Join-Path $HOME "velkor" }
 
 function Install-Repo {

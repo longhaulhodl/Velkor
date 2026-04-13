@@ -3,7 +3,7 @@
 # Velkor — One-line installer
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/maxheld/velkor/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/longhaulhodl/Velkor/main/scripts/install.sh | bash
 #
 # What it does:
 #   1. Checks prerequisites (git, node, docker)
@@ -131,7 +131,7 @@ check_prerequisites() {
 # Clone or update
 # ---------------------------------------------------------------------------
 
-REPO_URL="https://github.com/maxheld/velkor.git"
+REPO_URL="https://github.com/longhaulhodl/Velkor.git"
 INSTALL_DIR="${VELKOR_DIR:-$HOME/velkor}"
 
 clone_repo() {

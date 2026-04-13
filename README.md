@@ -24,13 +24,13 @@ One command from zero to running. Requires **Node.js 18+** and **Docker**.
 ### Linux / macOS
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/maxheld/velkor/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/longhaulhodl/Velkor/main/scripts/install.sh | bash
 ```
 
 ### Windows (PowerShell)
 
 ```powershell
-irm https://raw.githubusercontent.com/maxheld/velkor/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/longhaulhodl/Velkor/main/scripts/install.ps1 | iex
 ```
 
 ### What happens
@@ -50,7 +50,7 @@ The wizard walks you through:
 ### Manual install
 
 ```bash
-git clone https://github.com/maxheld/velkor.git
+git clone https://github.com/longhaulhodl/Velkor.git
 cd velkor
 cd cli && npm install && npx tsc && cd ..
 node cli/dist/index.js setup
