@@ -17,3 +17,8 @@ aws-sdk-s3.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+# PDF text extraction
+pdf-extract = "0.7"
+# DOCX text extraction (ZIP archive + XML parsing)
+zip = { version = "2", default-features = false, features = ["deflate"] }
+quick-xml = "0.37"

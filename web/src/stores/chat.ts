@@ -36,14 +36,21 @@ interface ChatState {
 let msgCounter = 0;
 
 export const useChatStore = create<ChatState>((set, get) => ({
-  conversationId: null,
+  conversationId: localStorage.getItem('conversationId'),
   messages: [],
   streamingText: '',
   isStreaming: false,
   activeTools: [],
   error: null,
 
-  setConversationId: (id) => set({ conversationId: id }),
+  setConversationId: (id) => {
+    if (id) {
+      localStorage.setItem('conversationId', id);
+    } else {
+      localStorage.removeItem('conversationId');
+    }
+    set({ conversationId: id });
+  },
 
   addUserMessage: (content) => {
     const msg: ChatMessage = {
@@ -92,7 +99,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   loadMessages: (msgs) => set({ messages: msgs }),
 
-  reset: () =>
+  reset: () => {
+    localStorage.removeItem('conversationId');
     set({
       conversationId: null,
       messages: [],
@@ -100,5 +108,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       isStreaming: false,
       activeTools: [],
       error: null,
-    }),
+    });
+  },
 }));

@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Multipart, Path, Query, State},
     routing::get,
     Json, Router,
 };
@@ -10,7 +10,7 @@ use crate::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/", get(list_documents))
+        .route("/", get(list_documents).post(upload_document))
         .route("/:id", get(get_document).delete(delete_document))
 }
 
@@ -25,6 +25,71 @@ struct ListParams {
 
 fn default_limit() -> i64 {
     50
+}
+
+/// POST /internal/documents/upload
+/// Multipart form: workspace_id, user_id, file
+async fn upload_document(
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> Result<(axum::http::StatusCode, Json<serde_json::Value>), axum::http::StatusCode> {
+    let doc_store = state
+        .doc_store
+        .as_ref()
+        .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+
+    let mut workspace_id: Option<Uuid> = None;
+    let mut user_id: Option<Uuid> = None;
+    let mut filename: Option<String> = None;
+    let mut file_data: Option<Vec<u8>> = None;
+
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|_| axum::http::StatusCode::BAD_REQUEST)?
+    {
+        let field_name = field.name().unwrap_or("").to_string();
+        match field_name.as_str() {
+            "workspace_id" => {
+                let text: String = field.text().await.map_err(|_| axum::http::StatusCode::BAD_REQUEST)?;
+                workspace_id = Some(Uuid::parse_str(&text).map_err(|_| axum::http::StatusCode::BAD_REQUEST)?);
+            }
+            "user_id" => {
+                let text: String = field.text().await.map_err(|_| axum::http::StatusCode::BAD_REQUEST)?;
+                user_id = Some(Uuid::parse_str(&text).map_err(|_| axum::http::StatusCode::BAD_REQUEST)?);
+            }
+            "file" => {
+                filename = field.file_name().map(String::from);
+                let data: axum::body::Bytes = field.bytes().await.map_err(|_| axum::http::StatusCode::BAD_REQUEST)?;
+                file_data = Some(data.to_vec());
+            }
+            _ => {}
+        }
+    }
+
+    let workspace_id = workspace_id.ok_or(axum::http::StatusCode::BAD_REQUEST)?;
+    let user_id = user_id.ok_or(axum::http::StatusCode::BAD_REQUEST)?;
+    let filename = filename.ok_or(axum::http::StatusCode::BAD_REQUEST)?;
+    let file_data = file_data.ok_or(axum::http::StatusCode::BAD_REQUEST)?;
+
+    let doc = doc_store
+        .upload(workspace_id, user_id, &filename, file_data)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "Document upload failed");
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(serde_json::json!({
+            "id": doc.id,
+            "filename": doc.filename,
+            "mime_type": doc.mime_type,
+            "file_size": doc.file_size,
+            "created_at": doc.created_at.to_rfc3339(),
+        })),
+    ))
 }
 
 async fn list_documents(

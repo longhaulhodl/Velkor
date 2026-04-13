@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useAuthStore } from './stores/auth';
 import Login from './pages/Login';
 import Chat from './pages/Chat';
+import Settings from './pages/Settings';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -27,6 +28,14 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route
+            path="/settings"
+            element={
+              <AuthGate>
+                <Settings />
+              </AuthGate>
+            }
+          />
           <Route
             path="/*"
             element={

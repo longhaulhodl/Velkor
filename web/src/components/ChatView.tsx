@@ -2,10 +2,13 @@ import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { useChatStore } from '../stores/chat';
 import { useWebSocket } from '../hooks/useWebSocket';
+import { api } from '../lib/api';
 import ToolIndicator from './ToolIndicator';
+import FileUpload from './FileUpload';
 
 export default function ChatView() {
   const [input, setInput] = useState('');
+  const [showUpload, setShowUpload] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const {
     messages,
@@ -15,8 +18,29 @@ export default function ChatView() {
     conversationId,
     error,
     addUserMessage,
+    loadMessages,
   } = useChatStore();
   const { sendMessage } = useWebSocket();
+
+  // Load messages when mounting with a saved conversationId
+  const loadedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (conversationId && conversationId !== loadedRef.current && messages.length === 0) {
+      loadedRef.current = conversationId;
+      api.getConversation(conversationId).then((detail) => {
+        if (detail?.messages?.length) {
+          loadMessages(
+            detail.messages.map((m, i) => ({
+              id: `loaded-${i}`,
+              role: m.role as 'user' | 'assistant',
+              content: m.content,
+              timestamp: new Date(m.created_at).getTime(),
+            })),
+          );
+        }
+      }).catch((e) => console.error('[Velkor] Failed to load conversation:', e));
+    }
+  }, [conversationId]);
 
   // Auto-scroll on new content
   useEffect(() => {
@@ -52,7 +76,7 @@ export default function ChatView() {
           {messages.map((msg) => (
             <div key={msg.id} className={`mb-6 ${msg.role === 'user' ? 'flex justify-end' : ''}`}>
               {msg.role === 'user' ? (
-                <div className="bg-zinc-800 rounded-2xl px-4 py-2.5 max-w-[80%] text-sm text-white">
+                <div className="bg-zinc-800 rounded-2xl px-4 py-2.5 max-w-[80%] text-sm text-white whitespace-pre-wrap">
                   {msg.content}
                 </div>
               ) : (
@@ -90,9 +114,23 @@ export default function ChatView() {
         </div>
       </div>
 
+      {/* File upload panel */}
+      {showUpload && (
+        <FileUpload onClose={() => setShowUpload(false)} />
+      )}
+
       {/* Input area */}
       <div className="border-t border-zinc-800 p-4">
-        <div className="max-w-3xl mx-auto flex gap-2">
+        <div className="max-w-3xl mx-auto flex gap-2 items-end">
+          <button
+            onClick={() => setShowUpload(!showUpload)}
+            title="Upload document"
+            className="p-2.5 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded-lg transition-colors self-end"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+            </svg>
+          </button>
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}

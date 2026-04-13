@@ -19,13 +19,13 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
 export const api = {
   // Auth
   login: (email: string, password: string) =>
-    request<{ token: string; user: User }>('/auth/login', {
+    request<{ token: string; refresh_token: string; user: User }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     }),
 
   register: (email: string, password: string, display_name: string) =>
-    request<{ token: string; user: User }>('/auth/register', {
+    request<{ token: string; refresh_token: string; user: User }>('/auth/register', {
       method: 'POST',
       body: JSON.stringify({ email, password, name: display_name }),
     }),
@@ -34,6 +34,12 @@ export const api = {
     const res = await request<{ user: User }>('/auth/me');
     return res.user;
   },
+
+  refreshToken: (refreshToken: string) =>
+    request<{ token: string }>('/auth/refresh', {
+      method: 'POST',
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    }),
 
   // Conversations
   listConversations: async (limit = 50, offset = 0) => {
@@ -55,6 +61,31 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ query, scope, limit }),
     }),
+
+  // Documents
+  uploadDocument: async (workspaceId: string, file: File) => {
+    const token = localStorage.getItem('token');
+    const form = new FormData();
+    form.append('workspace_id', workspaceId);
+    form.append('file', file);
+
+    const res = await fetch(`${BASE}/documents`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    });
+    if (!res.ok) throw new Error(await res.text().catch(() => `${res.status}`));
+    return res.json() as Promise<{ document: DocumentMeta }>;
+  },
+
+  listDocuments: (workspaceId: string) =>
+    request<{ documents: DocumentMeta[] }>(`/documents?workspace_id=${workspaceId}`),
+
+  deleteDocument: (id: string) =>
+    request<void>(`/documents/${id}`, { method: 'DELETE' }),
+
+  deleteConversation: (id: string) =>
+    request<void>(`/conversations/${id}`, { method: 'DELETE' }),
 };
 
 // Types
@@ -80,6 +111,14 @@ export interface ConversationDetail extends Conversation {
 export interface Message {
   role: string;
   content: string;
+  created_at: string;
+}
+
+export interface DocumentMeta {
+  id: string;
+  filename: string;
+  mime_type: string | null;
+  file_size: number | null;
   created_at: string;
 }
 

@@ -3,6 +3,7 @@ mod routes;
 use anyhow::Result;
 use std::sync::Arc;
 use velkor_audit::logger::AuditLogger;
+use velkor_documents::store::DocumentStore;
 use velkor_memory::service::MemoryService;
 use velkor_runtime::react::AgentRuntime;
 
@@ -13,6 +14,7 @@ pub struct AppState {
     pub memory: Arc<MemoryService>,
     pub audit: AuditLogger,
     pub runtime: Arc<AgentRuntime>,
+    pub doc_store: Option<Arc<DocumentStore>>,
 }
 
 #[tokio::main]
@@ -109,8 +111,97 @@ async fn main() -> Result<()> {
 
     let model_router = Arc::new(model_router);
 
-    // Build tool registry
-    let tools = Arc::new(velkor_tools::registry::ToolRegistry::new());
+    // Build tool registry with all Phase 1 built-in tools
+    let mut tools = velkor_tools::registry::ToolRegistry::new();
+
+    // Web search tool (auto-detects provider from config: Tavily → Brave → Serper → Perplexity → DuckDuckGo)
+    {
+        let ws_config = config
+            .tools
+            .as_ref()
+            .and_then(|t| t.web_search.clone())
+            .unwrap_or_default();
+        if let Some(ws_tool) = velkor_tools::builtin::web_search::WebSearchTool::from_config(&ws_config) {
+            tracing::info!("Registered tool: web_search");
+            tools.register(Box::new(ws_tool));
+        } else {
+            // Fallback to DuckDuckGo so web search always works
+            tracing::info!("Registered tool: web_search (DuckDuckGo fallback)");
+            tools.register(Box::new(velkor_tools::builtin::web_search::WebSearchTool::duckduckgo()));
+        }
+    }
+
+    // Web fetch tool
+    {
+        let wf_config = config.tools.as_ref().and_then(|t| t.web_fetch.clone());
+        let enabled = wf_config.as_ref().map(|c| c.enabled).unwrap_or(true);
+        if enabled {
+            let max_len = wf_config.map(|c| c.max_content_length).unwrap_or(50_000);
+            tracing::info!("Registered tool: web_fetch (max_content_length={})", max_len);
+            tools.register(Box::new(velkor_tools::builtin::web_fetch::WebFetchTool::new(max_len)));
+        }
+    }
+
+    // Memory tools (store + search)
+    {
+        let mem_enabled = config
+            .tools
+            .as_ref()
+            .and_then(|t| t.memory.as_ref())
+            .map(|m| m.enabled)
+            .unwrap_or(true);
+        if mem_enabled {
+            tracing::info!("Registered tools: memory_store, memory_search");
+            tools.register(Box::new(velkor_tools::builtin::memory::MemoryStoreTool::new(Arc::clone(&memory))));
+            tools.register(Box::new(velkor_tools::builtin::memory::MemorySearchTool::new(Arc::clone(&memory))));
+        }
+    }
+
+    // Document tools (read + search) — only if S3 storage is configured
+    let doc_store: Option<Arc<DocumentStore>> = {
+        let doc_enabled = config
+            .tools
+            .as_ref()
+            .and_then(|t| t.documents.as_ref())
+            .map(|d| d.enabled)
+            .unwrap_or(true);
+        if doc_enabled {
+            if let Some(s3_cfg) = config.database.s3.as_ref() {
+                let s3_config = aws_sdk_s3::Config::builder()
+                    .endpoint_url(&s3_cfg.endpoint)
+                    .credentials_provider(aws_sdk_s3::config::Credentials::new(
+                        &s3_cfg.access_key,
+                        &s3_cfg.secret_key,
+                        None,
+                        None,
+                        "velkor-config",
+                    ))
+                    .region(aws_sdk_s3::config::Region::new("us-east-1"))
+                    .force_path_style(true)
+                    .behavior_version_latest()
+                    .build();
+                let s3_client = aws_sdk_s3::Client::from_conf(s3_config);
+                let store = Arc::new(DocumentStore::new(
+                    pool.clone(),
+                    s3_client,
+                    s3_cfg.bucket.clone(),
+                    Arc::clone(&embedder),
+                ));
+                tracing::info!("Registered tools: document_read, document_search");
+                tools.register(Box::new(velkor_tools::builtin::documents::DocumentReadTool::new(Arc::clone(&store))));
+                tools.register(Box::new(velkor_tools::builtin::documents::DocumentSearchTool::new(Arc::clone(&store))));
+                Some(store)
+            } else {
+                tracing::warn!("Document tools disabled — no S3 storage configured (database.s3)");
+                None
+            }
+        } else {
+            None
+        }
+    };
+
+    tracing::info!(count = tools.len(), names = ?tools.tool_names(), "Tool registry ready");
+    let tools = Arc::new(tools);
 
     // Build agent runtime — use the default model from the first configured provider
     let default_model = config
@@ -136,11 +227,18 @@ async fn main() -> Result<()> {
     ));
 
     let state = AppState {
-        pool,
+        pool: pool.clone(),
         memory,
         audit,
         runtime,
+        doc_store,
     };
+
+    // Start retention background task
+    let _retention_handle = velkor_retention::spawn_retention_task(
+        pool,
+        velkor_retention::RetentionConfig::default(),
+    );
 
     // Build router
     let app = routes::internal_router().with_state(state);

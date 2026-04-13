@@ -25,7 +25,7 @@ license = "AGPL-3.0"
 
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }
-axum = "0.7"
+axum = { version = "0.7", features = ["multipart"] }
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
 redis = { version = "0.27", features = ["tokio-comp", "streams"] }
 aws-sdk-s3 = "1"
@@ -82,3 +82,4 @@ tokio-stream = "0.1"
 tracing.workspace = true
 tracing-subscriber.workspace = true
 anyhow.workspace = true
+aws-sdk-s3.workspace = true
