@@ -1,0 +1,84 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/config",
+    "crates/db",
+    "crates/audit",
+    "crates/memory",
+    "crates/models",
+    "crates/runtime",
+    "crates/orchestrator",
+    "crates/scheduler",
+    "crates/skills",
+    "crates/documents",
+    "crates/retention",
+    "crates/auth",
+    "crates/tools",
+    "crates/security",
+    "crates/observability",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = "0.7"
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
+redis = { version = "0.27", features = ["tokio-comp", "streams"] }
+aws-sdk-s3 = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+argon2 = "0.5"
+jsonwebtoken = "9"
+tokio-cron-scheduler = "0.13"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+async-trait = "0.1"
+futures = "0.3"
+anyhow = "1"
+thiserror = "2"
+pgvector = { version = "0.4", features = ["sqlx"] }
+regex = "1"
+
+# The core binary
+[package]
+name = "velkor"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+velkor-config = { path = "crates/config" }
+velkor-db = { path = "crates/db" }
+velkor-audit = { path = "crates/audit" }
+velkor-memory = { path = "crates/memory" }
+velkor-models = { path = "crates/models" }
+velkor-runtime = { path = "crates/runtime" }
+velkor-orchestrator = { path = "crates/orchestrator" }
+velkor-scheduler = { path = "crates/scheduler" }
+velkor-skills = { path = "crates/skills" }
+velkor-documents = { path = "crates/documents" }
+velkor-retention = { path = "crates/retention" }
+velkor-auth = { path = "crates/auth" }
+velkor-tools = { path = "crates/tools" }
+velkor-security = { path = "crates/security" }
+velkor-observability = { path = "crates/observability" }
+tokio.workspace = true
+axum.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+tokio-stream = "0.1"
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true

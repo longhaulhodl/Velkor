@@ -1,0 +1,14 @@
+[package]
+name = "velkor-db"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+velkor-config = { path = "../config" }
+sqlx.workspace = true
+redis.workspace = true
+aws-sdk-s3.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+uuid.workspace = true

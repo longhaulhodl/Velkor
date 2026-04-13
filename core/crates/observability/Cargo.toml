@@ -1,0 +1,9 @@
+[package]
+name = "velkor-observability"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true

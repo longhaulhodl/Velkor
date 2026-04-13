@@ -1,0 +1,19 @@
+[package]
+name = "velkor-documents"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+velkor-db = { path = "../db" }
+velkor-memory = { path = "../memory" }
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+pgvector.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+async-trait.workspace = true
+aws-sdk-s3.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+tokio.workspace = true

@@ -1,0 +1,15 @@
+[package]
+name = "velkor-retention"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+velkor-db = { path = "../db" }
+velkor-audit = { path = "../audit" }
+serde.workspace = true
+sqlx.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+anyhow.workspace = true

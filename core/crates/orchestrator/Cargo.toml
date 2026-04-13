@@ -1,0 +1,11 @@
+[package]
+name = "velkor-orchestrator"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+velkor-runtime = { path = "../runtime" }
+velkor-config = { path = "../config" }
+tokio.workspace = true
+tracing.workspace = true
+anyhow.workspace = true

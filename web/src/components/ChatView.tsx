@@ -1,0 +1,124 @@
+import { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+import { useChatStore } from '../stores/chat';
+import { useWebSocket } from '../hooks/useWebSocket';
+import ToolIndicator from './ToolIndicator';
+
+export default function ChatView() {
+  const [input, setInput] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const {
+    messages,
+    streamingText,
+    isStreaming,
+    activeTools,
+    conversationId,
+    error,
+    addUserMessage,
+  } = useChatStore();
+  const { sendMessage } = useWebSocket();
+
+  // Auto-scroll on new content
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, streamingText, activeTools]);
+
+  const handleSend = () => {
+    const text = input.trim();
+    if (!text || isStreaming) return;
+    addUserMessage(text);
+    sendMessage(text, conversationId);
+    setInput('');
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  return (
+    <div className="flex-1 flex flex-col h-screen bg-zinc-950">
+      {/* Messages area */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-3xl mx-auto py-8 px-4">
+          {messages.length === 0 && !isStreaming && (
+            <div className="text-center pt-32">
+              <h2 className="text-xl text-zinc-400 font-light">What can I help you with?</h2>
+            </div>
+          )}
+
+          {messages.map((msg) => (
+            <div key={msg.id} className={`mb-6 ${msg.role === 'user' ? 'flex justify-end' : ''}`}>
+              {msg.role === 'user' ? (
+                <div className="bg-zinc-800 rounded-2xl px-4 py-2.5 max-w-[80%] text-sm text-white">
+                  {msg.content}
+                </div>
+              ) : (
+                <div className="prose prose-invert prose-sm max-w-none text-zinc-300">
+                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                </div>
+              )}
+            </div>
+          ))}
+
+          {/* Tool status indicators */}
+          {activeTools.length > 0 && (
+            <div className="mb-4 space-y-1">
+              {activeTools.map((t) => (
+                <ToolIndicator key={t.tool} tool={t.tool} status={t.status} />
+              ))}
+            </div>
+          )}
+
+          {/* Streaming text */}
+          {streamingText && (
+            <div className="mb-6 prose prose-invert prose-sm max-w-none text-zinc-300">
+              <ReactMarkdown>{streamingText}</ReactMarkdown>
+              <span className="inline-block w-1.5 h-4 bg-zinc-400 animate-pulse ml-0.5 align-text-bottom" />
+            </div>
+          )}
+
+          {error && (
+            <div className="mb-4 text-red-400 text-sm bg-red-950/30 border border-red-900 rounded-lg px-3 py-2">
+              {error}
+            </div>
+          )}
+
+          <div ref={messagesEndRef} />
+        </div>
+      </div>
+
+      {/* Input area */}
+      <div className="border-t border-zinc-800 p-4">
+        <div className="max-w-3xl mx-auto flex gap-2">
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Send a message..."
+            rows={1}
+            className="flex-1 resize-none bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500 min-h-[44px] max-h-[200px]"
+            style={{
+              height: 'auto',
+              overflow: input.split('\n').length > 1 ? 'auto' : 'hidden',
+            }}
+            onInput={(e) => {
+              const el = e.target as HTMLTextAreaElement;
+              el.style.height = 'auto';
+              el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+            }}
+          />
+          <button
+            onClick={handleSend}
+            disabled={!input.trim() || isStreaming}
+            className="px-4 py-2 bg-white text-black rounded-xl text-sm font-medium hover:bg-zinc-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors self-end"
+          >
+            Send
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

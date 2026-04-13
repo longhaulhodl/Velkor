@@ -1,0 +1,62 @@
+platform:
+  name: "Velkor"
+  host: "0.0.0.0"
+  port: 3001
+  secret_key: "${PLATFORM_SECRET_KEY}"
+
+database:
+  postgres_url: "${DATABASE_URL}"
+  redis_url: "${REDIS_URL}"
+  s3:
+    endpoint: "${S3_ENDPOINT}"
+    access_key: "${S3_ACCESS_KEY}"
+    secret_key: "${S3_SECRET_KEY}"
+    bucket: "${S3_BUCKET:-velkor-documents}"
+
+providers:
+  openrouter:
+    api_key: "${OPENROUTER_API_KEY}"
+    default_model: "anthropic/claude-sonnet-4-20250514"
+  anthropic:
+    api_key: "${ANTHROPIC_API_KEY}"
+    default_model: "claude-sonnet-4-20250514"
+  openai:
+    api_key: "${OPENAI_API_KEY}"
+    default_model: "gpt-4o"
+
+routing:
+  strategy: "cost_optimized"
+  fallback_chain:
+    - "anthropic/claude-sonnet-4-20250514"
+    - "openai/gpt-4o"
+  cost_limit_daily_usd: 10.00
+  cost_limit_monthly_usd: 200.00
+
+memory:
+  embedding_model: "openai/text-embedding-3-small"
+  embedding_dimensions: 1536
+  auto_memorize: true
+  user_modeling: true
+  context_compression:
+    strategy: "summarize"
+    max_context_tokens: 100000
+
+scheduling:
+  enabled: true
+  heartbeat_interval_seconds: 60
+  timezone: "UTC"
+
+retention:
+  default_conversation_days: 365
+  default_memory_days: null
+  default_document_days: null
+  audit_log_days: 2555
+  auto_purge: true
+  purge_schedule: "0 2 * * *"
+
+channels:
+  web:
+    enabled: true
+  api:
+    enabled: true
+    rate_limit_per_minute: 100

@@ -1,0 +1,15 @@
+[package]
+name = "velkor-audit"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+velkor-db = { path = "../db" }
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+tokio.workspace = true

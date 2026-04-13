@@ -1,0 +1,19 @@
+[package]
+name = "velkor-runtime"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+velkor-config = { path = "../config" }
+velkor-models = { path = "../models" }
+velkor-memory = { path = "../memory" }
+velkor-audit = { path = "../audit" }
+velkor-tools = { path = "../tools" }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-stream = "0.1"
+uuid.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+thiserror.workspace = true

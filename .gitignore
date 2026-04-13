@@ -1,0 +1,25 @@
+# Build artifacts
+core/target/
+api/dist/
+web/dist/
+cli/dist/
+
+# Dependencies
+node_modules/
+
+# Environment / secrets
+.env
+.velkor-seed.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Claude Code
+.claude/
