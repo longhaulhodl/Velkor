@@ -435,26 +435,40 @@ fn parse_openai_stream_chunk(parsed: &serde_json::Value) -> Option<StreamChunk> 
     }
 
     // Tool call deltas
+    // OpenAI streaming uses an integer "index" to correlate chunks for the same
+    // tool call. The "id" field is only present on the first chunk. We use
+    // "index" as the stable identifier so subsequent delta chunks can be matched.
     if let Some(tool_calls) = delta.get("tool_calls").and_then(|v| v.as_array()) {
         if let Some(tc) = tool_calls.first() {
-            let id = tc.get("id").and_then(|v| v.as_str()).unwrap_or("");
-            let func = tc.get("function")?;
+            let index = tc
+                .get("index")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            // Use "idx:<N>" as a stable key; real id only present on first chunk
+            let stable_id = tc
+                .get("id")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("idx:{index}"));
 
-            if let Some(name) = func.get("name").and_then(|v| v.as_str()) {
-                if !name.is_empty() {
-                    return Some(StreamChunk::ToolCallStart {
-                        id: id.to_string(),
-                        name: name.to_string(),
-                    });
+            if let Some(func) = tc.get("function") {
+                if let Some(name) = func.get("name").and_then(|v| v.as_str()) {
+                    if !name.is_empty() {
+                        return Some(StreamChunk::ToolCallStart {
+                            id: format!("idx:{index}"),
+                            name: name.to_string(),
+                        });
+                    }
                 }
-            }
 
-            if let Some(args) = func.get("arguments").and_then(|v| v.as_str()) {
-                if !args.is_empty() {
-                    return Some(StreamChunk::ToolCallDelta {
-                        id: id.to_string(),
-                        json_delta: args.to_string(),
-                    });
+                if let Some(args) = func.get("arguments").and_then(|v| v.as_str()) {
+                    if !args.is_empty() {
+                        return Some(StreamChunk::ToolCallDelta {
+                            id: stable_id,
+                            json_delta: args.to_string(),
+                        });
+                    }
                 }
             }
         }

@@ -13,6 +13,9 @@ done
 echo "Postgres is ready."
 
 echo "Running migrations..."
-psql "$DB_URL" -f /migrations/001_initial_schema.sql
+for f in /migrations/*.sql; do
+  echo "  -> $f"
+  psql "$DB_URL" -f "$f"
+done
 
 echo "Migrations complete."
