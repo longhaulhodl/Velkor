@@ -33,6 +33,12 @@ curl -fsSL https://raw.githubusercontent.com/longhaulhodl/Velkor/main/scripts/in
 irm https://raw.githubusercontent.com/longhaulhodl/Velkor/main/scripts/install.ps1 | iex
 ```
 
+### Windows (CMD)
+
+```cmd
+curl -fsSL https://raw.githubusercontent.com/longhaulhodl/Velkor/main/scripts/install.bat -o install.bat && install.bat
+```
+
 ### What happens
 
 1. Checks prerequisites (git, Node.js, Docker, Docker Compose)
