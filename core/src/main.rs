@@ -217,9 +217,11 @@ async fn main() -> Result<()> {
 
     let mut runtime_config = velkor_runtime::react::RuntimeConfig::default();
     runtime_config.model = default_model;
+    let tool_names: Vec<&str> = tools.tool_names();
     runtime_config.system_prompt = format!(
-        "You are {name}, a helpful AI assistant. \
-         You have access to tools and should use them when appropriate. \
+        "You are {name}, a helpful AI assistant.\n\n\
+         Runtime: platform={name} | model={model} | tools={tool_list}\n\n\
+         You have access to tools and should use them proactively. \
          When the user asks you to search the web, use the web_search tool. \
          When asked about documents, use document_search or document_read. \
          Be concise, accurate, and helpful. If you don't know something, say so \
@@ -227,6 +229,8 @@ async fn main() -> Result<()> {
          When using tool results, present the information faithfully — \
          do not fabricate details beyond what the tool returned.",
         name = config.platform.name,
+        model = runtime_config.model,
+        tool_list = tool_names.join(", "),
     );
 
     let runtime = Arc::new(AgentRuntime::new(
