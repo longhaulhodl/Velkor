@@ -188,7 +188,9 @@ launch_setup() {
   printf "${VIOLET}└────────────────────────────────────────┘${RESET}\n"
   echo ""
 
-  node cli/dist/index.js setup
+  # Reconnect stdin to the terminal — when run via curl|bash, stdin is the
+  # script itself, so interactive prompts (inquirer) would fail immediately.
+  node cli/dist/index.js setup </dev/tty
 }
 
 # ---------------------------------------------------------------------------
