@@ -473,7 +473,7 @@ async function offerDockerUp(
           `-d '${JSON.stringify({
             email: answers.adminEmail,
             password: answers.adminPassword,
-            display_name: "Admin",
+            name: "Admin",
           })}'`,
         { stdio: "pipe", timeout: 10_000 }
       );
