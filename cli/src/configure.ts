@@ -10,7 +10,8 @@
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { select, input, password } from "@inquirer/prompts";
+import { select, search, input, password } from "@inquirer/prompts";
+import ora from "ora";
 import { parse, stringify } from "yaml";
 
 import {
@@ -208,16 +209,22 @@ async function configureLlm(
     });
     envLines.push(`${envVar}=${apiKey}`);
 
-    const defaults: Record<string, string> = {
-      openrouter: "anthropic/claude-sonnet-4-20250514",
-      anthropic: "claude-sonnet-4-20250514",
-      openai: "gpt-4o",
-    };
+    // Validate key
+    const valid = await validateApiKey(provider, apiKey);
+    if (valid) {
+      success(`API key ${dim("verified ✓")}`);
+    } else {
+      failure(`Could not verify key — check that it's correct`);
+    }
+
+    // Model selection
+    const model = await selectModel(provider, apiKey);
+    success(`Model: ${info(model)}`);
+
     providers[provider] = {
       api_key: `\${${envVar}}`,
-      default_model: defaults[provider],
+      default_model: model,
     };
-    success(`${provider} ${dim("configured")}`);
   }
 
   // Merge — keep existing embedding provider in providers if present
@@ -247,6 +254,16 @@ async function configureLlm(
   }
 
   config.providers = providers;
+
+  // Update fallback chain with the new default model
+  const defaultModel = Object.values(providers).find(
+    (p) => p.default_model
+  )?.default_model;
+  if (defaultModel) {
+    const routing = (config.routing ?? {}) as Record<string, unknown>;
+    routing.fallback_chain = [defaultModel];
+    config.routing = routing;
+  }
 
   return { envLines, config };
 }
@@ -384,8 +401,30 @@ async function configureWebSearch(
       mask: "•",
     });
     envLines.push(`PERPLEXITY_API_KEY=${apiKey}`);
-    webSearch.perplexity = { api_key: "${PERPLEXITY_API_KEY:-}" };
-    success("Perplexity " + dim("configured"));
+
+    const searchModel = await select({
+      message: brand("Perplexity search model?"),
+      choices: [
+        {
+          name: `${bright("sonar-pro")} ${dim("— thorough search with citations (recommended)")}`,
+          value: "sonar-pro",
+        },
+        {
+          name: `${bright("sonar")} ${dim("— fast, lightweight search")}`,
+          value: "sonar",
+        },
+        {
+          name: `${bright("sonar-reasoning-pro")} ${dim("— deep research with reasoning")}`,
+          value: "sonar-reasoning-pro",
+        },
+        {
+          name: `${bright("sonar-reasoning")} ${dim("— reasoning-powered search")}`,
+          value: "sonar-reasoning",
+        },
+      ],
+    });
+    webSearch.perplexity = { api_key: "${PERPLEXITY_API_KEY:-}", model: searchModel };
+    success(`Perplexity ${info(searchModel)} ${dim("configured")}`);
   } else if (provider === "tavily") {
     const apiKey = await password({
       message: brand("Tavily API key:"),
@@ -412,4 +451,218 @@ async function configureWebSearch(
   config.tools = tools;
 
   return { envLines, config };
+}
+
+// ---------------------------------------------------------------------------
+// API key validation
+// ---------------------------------------------------------------------------
+
+async function validateApiKey(
+  provider: string,
+  apiKey: string
+): Promise<boolean> {
+  try {
+    let url: string;
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${apiKey}`,
+    };
+
+    switch (provider) {
+      case "openrouter":
+        url = "https://openrouter.ai/api/v1/auth/key";
+        break;
+      case "openai":
+        url = "https://api.openai.com/v1/models?limit=1";
+        break;
+      case "anthropic":
+        url = "https://api.anthropic.com/v1/models";
+        delete headers.Authorization;
+        headers["x-api-key"] = apiKey;
+        headers["anthropic-version"] = "2023-06-01";
+        break;
+      default:
+        return true;
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch(url, { headers, signal: controller.signal });
+    clearTimeout(timeout);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Fetch available models from provider API
+// ---------------------------------------------------------------------------
+
+interface ModelInfo {
+  id: string;
+  name: string;
+  context?: number;
+  pricing?: string;
+}
+
+async function fetchModels(
+  provider: string,
+  apiKey: string
+): Promise<ModelInfo[]> {
+  try {
+    const headers: Record<string, string> = {};
+    let url: string;
+
+    switch (provider) {
+      case "openrouter":
+        url = "https://openrouter.ai/api/v1/models";
+        headers.Authorization = `Bearer ${apiKey}`;
+        break;
+      case "openai":
+        url = "https://api.openai.com/v1/models";
+        headers.Authorization = `Bearer ${apiKey}`;
+        break;
+      case "anthropic":
+        url = "https://api.anthropic.com/v1/models";
+        headers["x-api-key"] = apiKey;
+        headers["anthropic-version"] = "2023-06-01";
+        break;
+      default:
+        return [];
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    const res = await fetch(url, { headers, signal: controller.signal });
+    clearTimeout(timeout);
+
+    if (!res.ok) return [];
+    const json = (await res.json()) as Record<string, unknown>;
+
+    if (provider === "openrouter") {
+      const data = (json.data ?? []) as Array<Record<string, unknown>>;
+      return data
+        .filter((m) => {
+          const arch = m.architecture as Record<string, string> | undefined;
+          const modality = arch?.modality ?? (m.type as string) ?? "";
+          if (modality && !modality.includes("text")) return false;
+          const id = String(m.id);
+          if (id.includes("embed") || id.includes("moderat")) return false;
+          return true;
+        })
+        .map((m) => {
+          const pricing = m.pricing as Record<string, string> | undefined;
+          const prompt = pricing?.prompt ? parseFloat(pricing.prompt) : 0;
+          const completion = pricing?.completion
+            ? parseFloat(pricing.completion)
+            : 0;
+          const pricingStr =
+            prompt > 0
+              ? `$${(prompt * 1_000_000).toFixed(2)}/$${(completion * 1_000_000).toFixed(2)} per M tok`
+              : "free";
+
+          return {
+            id: String(m.id),
+            name: String(m.name ?? m.id),
+            context: (m.context_length as number) ?? 0,
+            pricing: pricingStr,
+          };
+        });
+    }
+
+    if (provider === "openai") {
+      const data = (json.data ?? []) as Array<Record<string, unknown>>;
+      return data
+        .filter((m) => {
+          const id = String(m.id);
+          return (
+            id.startsWith("gpt-") ||
+            id.startsWith("o1") ||
+            id.startsWith("o3") ||
+            id.startsWith("o4") ||
+            id.startsWith("chatgpt-")
+          );
+        })
+        .map((m) => ({
+          id: String(m.id),
+          name: String(m.id),
+        }));
+    }
+
+    if (provider === "anthropic") {
+      const data = (json.data ?? []) as Array<Record<string, unknown>>;
+      return data.map((m) => ({
+        id: String(m.id),
+        name: String(m.display_name ?? m.id),
+      }));
+    }
+
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Model selection — fetch live models, search to filter
+// ---------------------------------------------------------------------------
+
+async function selectModel(
+  provider: string,
+  apiKey: string
+): Promise<string> {
+  const spinner = ora({
+    text: "Fetching available models...",
+    color: "magenta",
+  }).start();
+
+  const models = await fetchModels(provider, apiKey);
+  spinner.stop();
+
+  if (models.length === 0) {
+    bullet(dim("Could not fetch model list — enter model ID manually"));
+    const hint =
+      provider === "openrouter"
+        ? "e.g. anthropic/claude-sonnet-4-20250514"
+        : provider === "anthropic"
+          ? "e.g. claude-sonnet-4-20250514"
+          : "e.g. gpt-4o";
+    return input({
+      message: brand(`Model ID (${hint}):`),
+      validate: (v: string) => (v.trim() ? true : "Model ID is required"),
+    });
+  }
+
+  console.log(
+    dim(`  ${models.length} models available — type to search\n`)
+  );
+
+  const selected = await search({
+    message: brand("Default model?"),
+    source: async (term) => {
+      const q = (term ?? "").toLowerCase().trim();
+
+      const filtered = q
+        ? models.filter(
+            (m) =>
+              m.id.toLowerCase().includes(q) ||
+              m.name.toLowerCase().includes(q)
+          )
+        : models.slice(0, 20);
+
+      return filtered.slice(0, 30).map((m) => {
+        const ctx = m.context
+          ? dim(` ${Math.floor(m.context / 1000)}k ctx`)
+          : "";
+        const price = m.pricing ? dim(` ${m.pricing}`) : "";
+        return {
+          name: `${bright(m.name)}${ctx}${price}`,
+          value: m.id,
+          description: m.id,
+        };
+      });
+    },
+  });
+
+  return selected;
 }

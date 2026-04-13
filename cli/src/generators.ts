@@ -25,6 +25,7 @@ export interface WizardAnswers {
   // Search
   searchProvider: string;
   searchApiKey?: string;
+  searchModel?: string;
 
   // Admin
   adminEmail: string;
@@ -186,19 +187,19 @@ export function generateConfig(
     case "openrouter":
       providers.openrouter = {
         api_key: "${OPENROUTER_API_KEY}",
-        default_model: "anthropic/claude-sonnet-4-20250514",
+        default_model: answers.llmModel || "anthropic/claude-sonnet-4-20250514",
       };
       break;
     case "anthropic":
       providers.anthropic = {
         api_key: "${ANTHROPIC_API_KEY}",
-        default_model: "claude-sonnet-4-20250514",
+        default_model: answers.llmModel || "claude-sonnet-4-20250514",
       };
       break;
     case "openai":
       providers.openai = {
         api_key: "${OPENAI_API_KEY}",
-        default_model: "gpt-4o",
+        default_model: answers.llmModel || "gpt-4o",
       };
       break;
     case "ollama":
@@ -235,13 +236,13 @@ export function generateConfig(
 
   config.providers = providers;
 
-  // Routing
+  // Routing — use the user's selected model as primary in fallback chain
   const fallback: string[] = [];
   if (providers.openrouter)
-    fallback.push("anthropic/claude-sonnet-4-20250514");
+    fallback.push(answers.llmModel || "anthropic/claude-sonnet-4-20250514");
   if (providers.anthropic)
-    fallback.push("anthropic/claude-sonnet-4-20250514");
-  if (providers.openai) fallback.push("openai/gpt-4o");
+    fallback.push(answers.llmModel || "claude-sonnet-4-20250514");
+  if (providers.openai) fallback.push(answers.llmModel || "gpt-4o");
   if (providers.ollama)
     fallback.push(`ollama/${answers.llmModel || "llama3.1:8b"}`);
   if (providers.custom && answers.llmModel)
@@ -293,6 +294,7 @@ export function generateConfig(
     case "perplexity":
       toolsSearch.perplexity = {
         api_key: "${PERPLEXITY_API_KEY:-}",
+        model: answers.searchModel || "sonar-pro",
       };
       break;
   }

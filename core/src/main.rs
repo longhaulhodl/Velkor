@@ -66,14 +66,48 @@ async fn main() -> Result<()> {
         Arc::clone(&embedder),
     ));
 
-    // Build model router
-    let model_router = Arc::new(velkor_models::router::ModelRouter::new(
+    // Build model router and register providers from config
+    let mut model_router = velkor_models::router::ModelRouter::new(
         config
             .routing
             .as_ref()
             .map(|r| r.fallback_chain.clone())
             .unwrap_or_default(),
-    ));
+    );
+
+    for (name, provider_cfg) in &config.providers {
+        let api_key = provider_cfg.api_key.clone().unwrap_or_default();
+        let provider: Box<dyn velkor_models::LlmProvider> = match name.as_str() {
+            "anthropic" => {
+                Box::new(velkor_models::anthropic::AnthropicProvider::new(
+                    api_key,
+                    provider_cfg.base_url.clone(),
+                ))
+            }
+            "openai" => {
+                Box::new(velkor_models::openai_compat::OpenAICompatProvider::openai(api_key))
+            }
+            "ollama" => {
+                Box::new(velkor_models::openai_compat::OpenAICompatProvider::ollama(
+                    provider_cfg.base_url.clone(),
+                ))
+            }
+            "openrouter" => {
+                Box::new(velkor_models::openai_compat::OpenAICompatProvider::openrouter(api_key))
+            }
+            other => {
+                Box::new(velkor_models::openai_compat::OpenAICompatProvider::custom(
+                    other.to_string(),
+                    api_key,
+                    provider_cfg.base_url.clone().unwrap_or_default(),
+                ))
+            }
+        };
+        tracing::info!(provider = name, "Registered LLM provider");
+        model_router.add_provider(name, provider);
+    }
+
+    let model_router = Arc::new(model_router);
 
     // Build tool registry
     let tools = Arc::new(velkor_tools::registry::ToolRegistry::new());
