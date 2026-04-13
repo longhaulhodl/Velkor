@@ -6,9 +6,10 @@ const DEFAULT_WORKSPACE = '00000000-0000-0000-0000-000000000001';
 
 interface Props {
   onClose: () => void;
+  onUploaded?: (doc: DocumentMeta) => void;
 }
 
-export default function FileUpload({ onClose }: Props) {
+export default function FileUpload({ onClose, onUploaded }: Props) {
   const [uploading, setUploading] = useState(false);
   const [uploaded, setUploaded] = useState<DocumentMeta[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -26,6 +27,7 @@ export default function FileUpload({ onClose }: Props) {
       try {
         const res = await api.uploadDocument(DEFAULT_WORKSPACE, file);
         results.push(res.document);
+        onUploaded?.(res.document);
       } catch (e) {
         setError(`Failed to upload ${file.name}: ${(e as Error).message}`);
       }

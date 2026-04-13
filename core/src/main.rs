@@ -217,6 +217,17 @@ async fn main() -> Result<()> {
 
     let mut runtime_config = velkor_runtime::react::RuntimeConfig::default();
     runtime_config.model = default_model;
+    runtime_config.system_prompt = format!(
+        "You are {name}, a helpful AI assistant. \
+         You have access to tools and should use them when appropriate. \
+         When the user asks you to search the web, use the web_search tool. \
+         When asked about documents, use document_search or document_read. \
+         Be concise, accurate, and helpful. If you don't know something, say so \
+         rather than making up information. \
+         When using tool results, present the information faithfully — \
+         do not fabricate details beyond what the tool returned.",
+        name = config.platform.name,
+    );
 
     let runtime = Arc::new(AgentRuntime::new(
         runtime_config,

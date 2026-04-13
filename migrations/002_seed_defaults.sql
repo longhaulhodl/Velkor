@@ -6,8 +6,3 @@ VALUES (
     'Default',
     'Default workspace for document uploads'
 ) ON CONFLICT (id) DO NOTHING;
-
--- The conversations table is partitioned with PK (id, started_at).
--- The chat upsert needs ON CONFLICT on id alone, so add a unique index.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_id_unique
-    ON conversations (id);

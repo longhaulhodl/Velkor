@@ -1,14 +1,19 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { useChatStore } from '../stores/chat';
 import { useWebSocket } from '../hooks/useWebSocket';
-import { api } from '../lib/api';
+import { api, type DocumentMeta } from '../lib/api';
 import ToolIndicator from './ToolIndicator';
 import FileUpload from './FileUpload';
 
 export default function ChatView() {
   const [input, setInput] = useState('');
   const [showUpload, setShowUpload] = useState(false);
+  const [pendingDocs, setPendingDocs] = useState<DocumentMeta[]>([]);
+
+  const handleDocUploaded = useCallback((doc: DocumentMeta) => {
+    setPendingDocs((prev) => [...prev, doc]);
+  }, []);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const {
     messages,
@@ -50,8 +55,20 @@ export default function ChatView() {
   const handleSend = () => {
     const text = input.trim();
     if (!text || isStreaming) return;
-    addUserMessage(text);
-    sendMessage(text, conversationId);
+
+    // If documents were uploaded, prepend references so the model knows about them
+    let fullMessage = text;
+    if (pendingDocs.length > 0) {
+      const docList = pendingDocs
+        .map((d) => `- "${d.filename}" (id: ${d.id})`)
+        .join('\n');
+      fullMessage = `[Attached documents — use document_read to access their content]\n${docList}\n\n${text}`;
+      setPendingDocs([]);
+      setShowUpload(false);
+    }
+
+    addUserMessage(text); // Show the original text to the user
+    sendMessage(fullMessage, conversationId);
     setInput('');
   };
 
@@ -116,7 +133,33 @@ export default function ChatView() {
 
       {/* File upload panel */}
       {showUpload && (
-        <FileUpload onClose={() => setShowUpload(false)} />
+        <FileUpload onClose={() => setShowUpload(false)} onUploaded={handleDocUploaded} />
+      )}
+
+      {/* Pending document badges */}
+      {pendingDocs.length > 0 && (
+        <div className="border-t border-zinc-800 px-4 pt-2">
+          <div className="max-w-3xl mx-auto flex flex-wrap gap-1.5">
+            {pendingDocs.map((doc) => (
+              <span
+                key={doc.id}
+                className="inline-flex items-center gap-1 text-xs bg-zinc-800 text-zinc-300 rounded-md px-2 py-1"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>
+                {doc.filename}
+                <button
+                  onClick={() => setPendingDocs((prev) => prev.filter((d) => d.id !== doc.id))}
+                  className="text-zinc-500 hover:text-zinc-300 ml-0.5"
+                >
+                  &times;
+                </button>
+              </span>
+            ))}
+          </div>
+        </div>
       )}
 
       {/* Input area */}
