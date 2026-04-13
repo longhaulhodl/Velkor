@@ -53,10 +53,17 @@ The wizard walks you through:
 - Creating your admin account
 - Starting all services with Docker Compose
 
-After install, `velkor` is available as a global command:
+After install, `velkor` is available as a global command for everything:
 
 ```bash
 velkor setup                          # Run the setup wizard again
+velkor start                          # Start all services
+velkor stop                           # Stop all services
+velkor restart                        # Rebuild and restart services
+velkor status                         # Show service status
+velkor logs                           # Tail all logs (Ctrl+C to exit)
+velkor logs core                      # Tail logs for a specific service
+velkor update                         # Pull latest version and rebuild
 velkor configure                      # Reconfigure a section interactively
 velkor configure --section llm        # Change LLM provider
 velkor configure --section embeddings # Change embedding provider
@@ -129,12 +136,24 @@ velkor setup
 After initial setup, change individual sections without redoing the wizard:
 
 ```bash
-node cli/dist/index.js configure --section llm          # Change LLM provider
-node cli/dist/index.js configure --section embeddings    # Change embedding provider
-node cli/dist/index.js configure --section web-search    # Change search provider
+velkor configure --section llm          # Change LLM provider
+velkor configure --section embeddings   # Change embedding provider
+velkor configure --section web-search   # Change search provider
 ```
 
-Or run `node cli/dist/index.js configure` for an interactive picker.
+Or run `velkor configure` for an interactive picker.
+
+### Day-to-day operations
+
+```bash
+velkor start                            # Start services
+velkor stop                             # Stop services
+velkor restart                          # Rebuild and restart (after config changes)
+velkor status                           # Check what's running
+velkor logs                             # Follow all logs
+velkor logs core                        # Follow logs for one service
+velkor update                           # Pull latest + rebuild + restart
+```
 
 ### LLM Providers
 
@@ -181,7 +200,7 @@ Embeddings are optional — full-text search works without them.
 
 ### Prerequisites
 
-- Rust 1.87+ (2024 edition)
+- Rust 1.92+ (2024 edition)
 - Node.js 18+
 - Docker + Docker Compose
 - PostgreSQL 17 with pgvector (or use Docker)

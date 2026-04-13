@@ -110,7 +110,7 @@ export async function runConfigure(
   success(`Configuration updated.`);
   bullet(
     "Run " +
-      info("docker compose up --build -d") +
+      info("velkor restart") +
       " to apply changes."
   );
   blank();
