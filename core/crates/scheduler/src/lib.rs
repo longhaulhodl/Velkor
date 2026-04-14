@@ -1,82 +1,24 @@
-//! Velkor scheduler — heartbeat-driven cron scheduler for autonomous agent tasks.
+//! Velkor scheduler — cron scheduler for autonomous agent tasks.
 //!
-//! Per PRD Section 5.2: a Tokio-based timer runs independently of user interaction.
-//! Every tick (configurable, default 60s):
+//! Implements `PulseSubsystem` so the unified pulse engine drives scheduling.
+//! Every tick:
 //! 1. Check for due scheduled tasks (next_run_at <= now, is_active = true)
 //! 2. Spawn agent execution for each due task
 //! 3. Record the run in schedule_runs with status, tokens, cost
 //! 4. Update schedule.last_run_at and compute schedule.next_run_at
 
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use cron::Schedule as CronSchedule;
 use serde::Serialize;
 use sqlx::PgPool;
 use std::str::FromStr;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
+use velkor_pulse::{PulseSubsystem, SubsystemTickResult};
 use velkor_runtime::context::ConversationContext;
 use velkor_runtime::react::AgentRuntime;
-
-// ---------------------------------------------------------------------------
-// Configuration
-// ---------------------------------------------------------------------------
-
-/// Scheduler configuration loaded from the platform YAML.
-#[derive(Debug, Clone)]
-pub struct SchedulerConfig {
-    /// Whether the scheduler is enabled.
-    pub enabled: bool,
-    /// Heartbeat interval in seconds (how often we check for due tasks).
-    pub heartbeat_secs: u64,
-    /// Timezone for cron evaluation (e.g. "America/Chicago"). Defaults to UTC.
-    pub timezone: Option<String>,
-}
-
-impl Default for SchedulerConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            heartbeat_secs: 60,
-            timezone: None,
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Status (shared handle, like retention)
-// ---------------------------------------------------------------------------
-
-/// Live status of the scheduler background task.
-#[derive(Debug, Clone, Serialize)]
-pub struct SchedulerStatus {
-    pub enabled: bool,
-    pub heartbeat_secs: u64,
-    pub last_tick_at: Option<DateTime<Utc>>,
-    pub last_tick_due: u32,
-    pub last_tick_executed: u32,
-    pub total_ticks: u64,
-    pub total_runs: u64,
-    pub total_failures: u64,
-    pub running: bool,
-}
-
-pub type SchedulerStatusHandle = Arc<RwLock<SchedulerStatus>>;
-
-pub fn new_status_handle(config: &SchedulerConfig) -> SchedulerStatusHandle {
-    Arc::new(RwLock::new(SchedulerStatus {
-        enabled: config.enabled,
-        heartbeat_secs: config.heartbeat_secs,
-        last_tick_at: None,
-        last_tick_due: 0,
-        last_tick_executed: 0,
-        total_ticks: 0,
-        total_runs: 0,
-        total_failures: 0,
-        running: config.enabled,
-    }))
-}
 
 // ---------------------------------------------------------------------------
 // Schedule row from DB
@@ -326,79 +268,6 @@ async fn tick(
     Ok((due_count, executed, failed))
 }
 
-// ---------------------------------------------------------------------------
-// Background task: the heartbeat loop
-// ---------------------------------------------------------------------------
-
-/// Spawn the scheduler heartbeat as a background tokio task.
-///
-/// Runs indefinitely, checking for due tasks at the configured interval.
-/// Updates the shared status handle after each tick.
-pub fn spawn_scheduler_task(
-    pool: PgPool,
-    config: SchedulerConfig,
-    runtime: Arc<AgentRuntime>,
-    status: SchedulerStatusHandle,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        if !config.enabled {
-            info!("Scheduler disabled via config");
-            let mut s = status.write().await;
-            s.running = false;
-            return;
-        }
-
-        info!(
-            heartbeat_secs = config.heartbeat_secs,
-            timezone = ?config.timezone,
-            "Scheduler heartbeat started"
-        );
-
-        // On startup, initialize next_run_at for any active schedules that are NULL
-        if let Err(e) = initialize_next_runs(&pool).await {
-            warn!(error = %e, "Failed to initialize next_run_at on startup");
-        }
-
-        let mut interval = tokio::time::interval(
-            std::time::Duration::from_secs(config.heartbeat_secs),
-        );
-
-        // Skip the first immediate tick to let the system fully start
-        interval.tick().await;
-
-        loop {
-            interval.tick().await;
-
-            match tick(&pool, &runtime).await {
-                Ok((due, executed, failed)) => {
-                    let mut s = status.write().await;
-                    s.last_tick_at = Some(Utc::now());
-                    s.last_tick_due = due;
-                    s.last_tick_executed = executed;
-                    s.total_ticks += 1;
-                    s.total_runs += executed as u64;
-                    s.total_failures += failed as u64;
-
-                    if due > 0 {
-                        info!(
-                            due = due,
-                            executed = executed,
-                            failed = failed,
-                            "Scheduler tick completed"
-                        );
-                    }
-                }
-                Err(e) => {
-                    warn!(error = %e, "Scheduler tick failed");
-                    let mut s = status.write().await;
-                    s.last_tick_at = Some(Utc::now());
-                    s.total_ticks += 1;
-                }
-            }
-        }
-    })
-}
-
 /// On startup, set next_run_at for any active schedule where it's NULL.
 async fn initialize_next_runs(pool: &PgPool) -> anyhow::Result<()> {
     let rows: Vec<(Uuid, String)> = sqlx::query_as(
@@ -626,6 +495,47 @@ pub async fn delete_schedule(pool: &PgPool, id: Uuid) -> anyhow::Result<bool> {
         .await?;
 
     Ok(result.rows_affected() > 0)
+}
+
+// ---------------------------------------------------------------------------
+// PulseSubsystem implementation
+// ---------------------------------------------------------------------------
+
+/// Scheduler as a pulse subsystem. Wraps the existing tick logic.
+pub struct SchedulerSubsystem {
+    pool: PgPool,
+    runtime: Arc<AgentRuntime>,
+}
+
+impl SchedulerSubsystem {
+    pub fn new(pool: PgPool, runtime: Arc<AgentRuntime>) -> Self {
+        Self { pool, runtime }
+    }
+}
+
+#[async_trait]
+impl PulseSubsystem for SchedulerSubsystem {
+    fn name(&self) -> &str {
+        "scheduler"
+    }
+
+    async fn tick(&self) -> anyhow::Result<SubsystemTickResult> {
+        let (due, executed, failed) = tick(&self.pool, &self.runtime).await?;
+        Ok(SubsystemTickResult {
+            name: "scheduler".to_string(),
+            checked: due,
+            processed: executed,
+            failed,
+            duration_ms: 0, // engine fills this in
+            details: None,
+        })
+    }
+}
+
+/// Initialize next_run_at for active schedules on startup.
+/// Should be called before the pulse engine starts.
+pub async fn initialize_on_startup(pool: &PgPool) -> anyhow::Result<()> {
+    initialize_next_runs(pool).await
 }
 
 /// List run history for a schedule.

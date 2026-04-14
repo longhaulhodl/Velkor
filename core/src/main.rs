@@ -18,8 +18,7 @@ pub struct AppState {
     pub runtime: Arc<AgentRuntime>,
     pub doc_store: Option<Arc<DocumentStore>>,
     pub skill_store: SkillStoreHandle,
-    pub retention_status: velkor_retention::RetentionStatusHandle,
-    pub scheduler_status: velkor_scheduler::SchedulerStatusHandle,
+    pub pulse_status: velkor_pulse::PulseStatusHandle,
     pub orchestrator: Option<velkor_orchestrator::OrchestratorHandle>,
     pub task_notifier: velkor_orchestrator::tasks::TaskNotifier,
 }
@@ -367,43 +366,67 @@ async fn main() -> Result<()> {
         .with_skill_store(Arc::clone(&skill_store)),
     );
 
-    // Start retention background task with config from YAML
-    let retention_config = {
-        let mut rc = velkor_retention::RetentionConfig::default();
-        if let Some(ref ret) = config.retention {
-            if let Some(days) = ret.default_conversation_days {
-                rc.default_retention_days = days as i64;
-            }
-            if !ret.auto_purge {
-                rc.interval_secs = 86400 * 365; // effectively off
-            }
-            rc.hard_delete = false; // always soft-delete for safety
-        }
-        rc
-    };
-    let retention_status = velkor_retention::new_status_handle(&retention_config);
-    let _retention_handle = velkor_retention::spawn_retention_task(
-        pool.clone(),
-        retention_config,
-        Arc::clone(&retention_status),
-    );
+    // ---------------------------------------------------------------------------
+    // Unified Pulse Engine — single background loop driving all subsystems
+    // ---------------------------------------------------------------------------
 
-    // Start scheduler heartbeat background task
-    let scheduler_config = {
-        let sched = config.scheduling.as_ref();
-        velkor_scheduler::SchedulerConfig {
-            enabled: sched.map(|s| s.enabled).unwrap_or(true),
-            heartbeat_secs: sched.map(|s| s.heartbeat_interval_seconds).unwrap_or(60),
-            timezone: sched.and_then(|s| s.timezone.clone()),
-        }
+    let pulse_interval_secs = config
+        .scheduling
+        .as_ref()
+        .map(|s| s.heartbeat_interval_seconds)
+        .unwrap_or(60);
+
+    let pulse_config = velkor_pulse::PulseConfig {
+        enabled: true,
+        interval_secs: pulse_interval_secs,
     };
-    let scheduler_status = velkor_scheduler::new_status_handle(&scheduler_config);
-    let _scheduler_handle = velkor_scheduler::spawn_scheduler_task(
-        pool.clone(),
-        scheduler_config,
-        Arc::clone(&runtime),
-        Arc::clone(&scheduler_status),
-    );
+    let pulse_status = velkor_pulse::new_status_handle(&pulse_config);
+    let mut pulse = velkor_pulse::PulseEngine::new(pulse_config, Arc::clone(&pulse_status));
+
+    // Subsystem 1: Scheduler (runs every tick)
+    {
+        let sched_enabled = config
+            .scheduling
+            .as_ref()
+            .map(|s| s.enabled)
+            .unwrap_or(true);
+        if sched_enabled {
+            // Initialize next_run_at for any active schedules on startup
+            if let Err(e) = velkor_scheduler::initialize_on_startup(&pool).await {
+                tracing::warn!(error = %e, "Failed to initialize schedule next_run_at on startup");
+            }
+            pulse.register(Box::new(
+                velkor_scheduler::SchedulerSubsystem::new(pool.clone(), Arc::clone(&runtime)),
+            ));
+        }
+    }
+
+    // Subsystem 2: Retention (runs at its own cadence, e.g. hourly)
+    {
+        let retention_config = {
+            let mut rc = velkor_retention::RetentionConfig::default();
+            if let Some(ref ret) = config.retention {
+                if let Some(days) = ret.default_conversation_days {
+                    rc.default_retention_days = days as i64;
+                }
+                if !ret.auto_purge {
+                    rc.interval_secs = 86400 * 365; // effectively off
+                }
+                rc.hard_delete = false; // always soft-delete for safety
+            }
+            rc
+        };
+        pulse.register(Box::new(
+            velkor_retention::RetentionSubsystem::new(
+                pool.clone(),
+                retention_config,
+                pulse_interval_secs,
+            ),
+        ));
+    }
+
+    // Spawn the unified pulse engine
+    let _pulse_handle = pulse.spawn();
 
     // Build orchestrator from the agent definitions loaded earlier
     let orchestrator: Option<velkor_orchestrator::OrchestratorHandle> = {
@@ -453,8 +476,7 @@ async fn main() -> Result<()> {
         runtime,
         doc_store,
         skill_store,
-        retention_status,
-        scheduler_status,
+        pulse_status,
         orchestrator,
         task_notifier,
     };

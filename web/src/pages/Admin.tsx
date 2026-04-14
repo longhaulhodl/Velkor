@@ -894,16 +894,19 @@ function SchedulesTab() {
         <div className="flex items-center gap-4 text-xs text-zinc-500 mb-2">
           <span className="flex items-center gap-1.5">
             <span className={`inline-block w-2 h-2 rounded-full ${schedulerStatus.running ? 'bg-green-500' : 'bg-red-500'}`} />
-            Scheduler {schedulerStatus.running ? 'running' : 'stopped'}
+            Pulse {schedulerStatus.running ? 'running' : 'stopped'}
           </span>
-          <span>Heartbeat: {schedulerStatus.heartbeat_secs}s</span>
-          <span>Ticks: {schedulerStatus.total_ticks}</span>
-          <span>Total runs: {schedulerStatus.total_runs}</span>
-          {schedulerStatus.total_failures > 0 && (
-            <span className="text-red-400">Failures: {schedulerStatus.total_failures}</span>
-          )}
-          {schedulerStatus.last_tick_at && (
-            <span>Last tick: {new Date(schedulerStatus.last_tick_at).toLocaleTimeString()}</span>
+          {schedulerStatus.subsystem && (
+            <>
+              <span>Runs: {schedulerStatus.subsystem.total_runs}</span>
+              <span>Processed: {schedulerStatus.subsystem.total_processed}</span>
+              {schedulerStatus.subsystem.total_failed > 0 && (
+                <span className="text-red-400">Failed: {schedulerStatus.subsystem.total_failed}</span>
+              )}
+              {schedulerStatus.subsystem.last_run_at && (
+                <span>Last run: {new Date(schedulerStatus.subsystem.last_run_at).toLocaleTimeString()}</span>
+              )}
+            </>
           )}
         </div>
       )}
@@ -1158,59 +1161,45 @@ export default function Admin() {
             ) : (
               <>
                 <div className="border border-zinc-800 rounded-lg p-6">
-                  <h3 className="text-sm font-medium text-zinc-300 mb-4">Retention Policy</h3>
+                  <h3 className="text-sm font-medium text-zinc-300 mb-4">Retention Subsystem</h3>
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
-                      <span className="text-zinc-500">Conversations</span>
-                      <p className="text-zinc-300 mt-1">{retention.config.default_retention_days} days</p>
-                    </div>
-                    <div>
-                      <span className="text-zinc-500">Delete mode</span>
-                      <p className="text-zinc-300 mt-1">{retention.config.hard_delete ? 'Hard delete' : 'Soft delete'}</p>
-                    </div>
-                    <div>
-                      <span className="text-zinc-500">Sweep interval</span>
-                      <p className="text-zinc-300 mt-1">
-                        {retention.config.interval_secs >= 86400
-                          ? `${Math.round(retention.config.interval_secs / 86400)}d`
-                          : retention.config.interval_secs >= 3600
-                          ? `${Math.round(retention.config.interval_secs / 3600)}h`
-                          : `${retention.config.interval_secs}s`}
-                      </p>
-                    </div>
-                    <div>
-                      <span className="text-zinc-500">Task status</span>
+                      <span className="text-zinc-500">Status</span>
                       <p className="mt-1 flex items-center gap-2">
                         <span className={`inline-block w-2 h-2 rounded-full ${retention.running ? 'bg-green-500' : 'bg-red-500'}`} />
                         <span className="text-zinc-300 text-sm">{retention.running ? 'Running' : 'Stopped'}</span>
                       </p>
                     </div>
-                  </div>
-                </div>
-
-                <div className="border border-zinc-800 rounded-lg p-6">
-                  <h3 className="text-sm font-medium text-zinc-300 mb-4">Sweep History</h3>
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <span className="text-zinc-500">Total sweeps</span>
-                      <p className="text-zinc-300 mt-1">{retention.total_sweeps}</p>
-                    </div>
-                    <div>
-                      <span className="text-zinc-500">Total deleted</span>
-                      <p className="text-zinc-300 mt-1">{retention.total_deleted} conversations</p>
-                    </div>
-                    <div>
-                      <span className="text-zinc-500">Last sweep</span>
-                      <p className="text-zinc-300 mt-1">
-                        {retention.last_sweep_at
-                          ? new Date(retention.last_sweep_at).toLocaleString()
-                          : 'Not yet'}
-                      </p>
-                    </div>
-                    <div>
-                      <span className="text-zinc-500">Last sweep deleted</span>
-                      <p className="text-zinc-300 mt-1">{retention.last_sweep_deleted} conversations</p>
-                    </div>
+                    {retention.subsystem && (
+                      <>
+                        <div>
+                          <span className="text-zinc-500">Total sweeps</span>
+                          <p className="text-zinc-300 mt-1">{retention.subsystem.total_runs}</p>
+                        </div>
+                        <div>
+                          <span className="text-zinc-500">Total processed</span>
+                          <p className="text-zinc-300 mt-1">{retention.subsystem.total_processed} conversations</p>
+                        </div>
+                        <div>
+                          <span className="text-zinc-500">Total failed</span>
+                          <p className="text-zinc-300 mt-1">{retention.subsystem.total_failed}</p>
+                        </div>
+                        <div>
+                          <span className="text-zinc-500">Last sweep</span>
+                          <p className="text-zinc-300 mt-1">
+                            {retention.subsystem.last_run_at
+                              ? new Date(retention.subsystem.last_run_at).toLocaleString()
+                              : 'Not yet'}
+                          </p>
+                        </div>
+                        {retention.subsystem.last_result && (
+                          <div>
+                            <span className="text-zinc-500">Last sweep processed</span>
+                            <p className="text-zinc-300 mt-1">{retention.subsystem.last_result.processed} conversations</p>
+                          </div>
+                        )}
+                      </>
+                    )}
                   </div>
                 </div>
               </>

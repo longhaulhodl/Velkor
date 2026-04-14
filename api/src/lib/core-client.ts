@@ -258,6 +258,14 @@ export async function searchAudit(params: {
 }
 
 // ---------------------------------------------------------------------------
+// Pulse (unified background engine)
+// ---------------------------------------------------------------------------
+
+export async function getPulseStatus(): Promise<unknown> {
+  return coreRequest("/internal/pulse/status");
+}
+
+// ---------------------------------------------------------------------------
 // Retention
 // ---------------------------------------------------------------------------
 

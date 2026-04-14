@@ -1,11 +1,13 @@
-//! Velkor retention — background job that auto-deletes expired conversations
-//! and messages based on configured retention policies.
+//! Velkor retention — auto-deletes expired conversations and messages
+//! based on configured retention policies.
+//!
+//! Implements `PulseSubsystem` so the unified pulse engine drives retention sweeps.
 
-use chrono::{DateTime, Duration, Utc};
+use async_trait::async_trait;
+use chrono::{Duration, Utc};
 use sqlx::PgPool;
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use tracing::{info, warn};
+use tracing::info;
+use velkor_pulse::{PulseSubsystem, SubsystemTickResult};
 
 /// Default retention period in days for conversations with no explicit policy.
 const DEFAULT_RETENTION_DAYS: i64 = 90;
@@ -29,43 +31,6 @@ impl Default for RetentionConfig {
             hard_delete: false,
         }
     }
-}
-
-/// Shared status of the retention background task.
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct RetentionStatus {
-    pub config: RetentionStatusConfig,
-    pub last_sweep_at: Option<DateTime<Utc>>,
-    pub last_sweep_deleted: u64,
-    pub total_sweeps: u64,
-    pub total_deleted: u64,
-    pub running: bool,
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct RetentionStatusConfig {
-    pub interval_secs: u64,
-    pub default_retention_days: i64,
-    pub hard_delete: bool,
-}
-
-/// Thread-safe handle to retention status, shared with the rest of the app.
-pub type RetentionStatusHandle = Arc<RwLock<RetentionStatus>>;
-
-/// Create a new status handle with the given config.
-pub fn new_status_handle(config: &RetentionConfig) -> RetentionStatusHandle {
-    Arc::new(RwLock::new(RetentionStatus {
-        config: RetentionStatusConfig {
-            interval_secs: config.interval_secs,
-            default_retention_days: config.default_retention_days,
-            hard_delete: config.hard_delete,
-        },
-        last_sweep_at: None,
-        last_sweep_deleted: 0,
-        total_sweeps: 0,
-        total_deleted: 0,
-        running: true,
-    }))
 }
 
 /// Run the retention sweep once — soft-deletes expired conversations and their
@@ -120,44 +85,61 @@ pub async fn sweep(pool: &PgPool, config: &RetentionConfig) -> anyhow::Result<u6
     }
 }
 
-/// Spawn the retention background task. Runs indefinitely, sweeping at the
-/// configured interval. Updates the shared status handle after each sweep.
-pub fn spawn_retention_task(
+// ---------------------------------------------------------------------------
+// PulseSubsystem implementation
+// ---------------------------------------------------------------------------
+
+/// Retention as a pulse subsystem. Runs at a configurable cadence
+/// (default: every 60 ticks = hourly at 60s base interval).
+pub struct RetentionSubsystem {
     pool: PgPool,
     config: RetentionConfig,
-    status: RetentionStatusHandle,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        info!(
-            interval_secs = config.interval_secs,
-            retention_days = config.default_retention_days,
-            "Retention background task started"
-        );
+    /// How many ticks between retention sweeps.
+    /// E.g. if pulse interval is 60s and every_n_ticks is 60, retention runs hourly.
+    every_n_ticks: u64,
+}
 
-        let mut interval = tokio::time::interval(
-            std::time::Duration::from_secs(config.interval_secs),
-        );
-
-        // Skip the first immediate tick
-        interval.tick().await;
-
-        loop {
-            interval.tick().await;
-            match sweep(&pool, &config).await {
-                Ok(count) => {
-                    let mut s = status.write().await;
-                    s.last_sweep_at = Some(Utc::now());
-                    s.last_sweep_deleted = count;
-                    s.total_sweeps += 1;
-                    s.total_deleted += count;
-                    if count > 0 {
-                        info!(expired = count, "Retention sweep completed");
-                    }
-                }
-                Err(e) => {
-                    warn!(error = %e, "Retention sweep failed");
-                }
-            }
+impl RetentionSubsystem {
+    pub fn new(pool: PgPool, config: RetentionConfig, pulse_interval_secs: u64) -> Self {
+        // Calculate how many ticks correspond to the retention interval
+        let every_n_ticks = if pulse_interval_secs > 0 {
+            config.interval_secs / pulse_interval_secs
+        } else {
+            1
         }
-    })
+        .max(1);
+
+        Self {
+            pool,
+            config,
+            every_n_ticks,
+        }
+    }
+}
+
+#[async_trait]
+impl PulseSubsystem for RetentionSubsystem {
+    fn name(&self) -> &str {
+        "retention"
+    }
+
+    fn should_run(&self, tick_number: u64, _interval_secs: u64) -> bool {
+        tick_number % self.every_n_ticks == 0
+    }
+
+    async fn tick(&self) -> anyhow::Result<SubsystemTickResult> {
+        let deleted = sweep(&self.pool, &self.config).await?;
+        Ok(SubsystemTickResult {
+            name: "retention".to_string(),
+            checked: 1, // one sweep operation
+            processed: deleted as u32,
+            failed: 0,
+            duration_ms: 0, // engine fills this in
+            details: if deleted > 0 {
+                Some(format!("Swept {} expired conversations", deleted))
+            } else {
+                None
+            },
+        })
+    }
 }

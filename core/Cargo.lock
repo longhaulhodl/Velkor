@@ -3709,6 +3709,7 @@ dependencies = [
  "velkor-models",
  "velkor-observability",
  "velkor-orchestrator",
+ "velkor-pulse",
  "velkor-retention",
  "velkor-runtime",
  "velkor-scheduler",
@@ -3866,10 +3867,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "velkor-pulse"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "velkor-retention"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "serde",
  "sqlx",
@@ -3878,6 +3893,7 @@ dependencies = [
  "uuid",
  "velkor-audit",
  "velkor-db",
+ "velkor-pulse",
 ]
 
 [[package]]
@@ -3905,6 +3921,7 @@ name = "velkor-scheduler"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "cron",
  "serde",
@@ -3917,6 +3934,7 @@ dependencies = [
  "velkor-db",
  "velkor-memory",
  "velkor-models",
+ "velkor-pulse",
  "velkor-runtime",
  "velkor-tools",
 ]

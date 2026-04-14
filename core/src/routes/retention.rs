@@ -9,6 +9,14 @@ pub fn router() -> Router<AppState> {
 async fn retention_status(
     State(state): State<AppState>,
 ) -> Json<serde_json::Value> {
-    let status = state.retention_status.read().await;
-    Json(serde_json::json!(&*status))
+    let status = state.pulse_status.read().await;
+    // Extract the retention subsystem status from the unified pulse status
+    let retention = status
+        .subsystems
+        .iter()
+        .find(|s| s.name == "retention");
+    Json(serde_json::json!({
+        "running": status.running,
+        "subsystem": retention,
+    }))
 }

@@ -22,8 +22,16 @@ pub fn router() -> Router<AppState> {
 // ---------------------------------------------------------------------------
 
 async fn scheduler_status(State(state): State<AppState>) -> Json<serde_json::Value> {
-    let status = state.scheduler_status.read().await;
-    Json(serde_json::json!(&*status))
+    let status = state.pulse_status.read().await;
+    // Extract the scheduler subsystem status from the unified pulse status
+    let scheduler = status
+        .subsystems
+        .iter()
+        .find(|s| s.name == "scheduler");
+    Json(serde_json::json!({
+        "running": status.running,
+        "subsystem": scheduler,
+    }))
 }
 
 // ---------------------------------------------------------------------------

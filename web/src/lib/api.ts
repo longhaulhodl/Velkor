@@ -84,6 +84,10 @@ export const api = {
   deleteDocument: (id: string) =>
     request<void>(`/documents/${id}`, { method: 'DELETE' }),
 
+  // Pulse (unified background engine)
+  getPulseStatus: () =>
+    request<PulseStatus>('/pulse/status'),
+
   // Retention
   getRetentionStatus: () =>
     request<RetentionStatus>('/retention/status'),
@@ -255,16 +259,8 @@ export interface MemoryResult {
 }
 
 export interface RetentionStatus {
-  config: {
-    interval_secs: number;
-    default_retention_days: number;
-    hard_delete: boolean;
-  };
-  last_sweep_at: string | null;
-  last_sweep_deleted: number;
-  total_sweeps: number;
-  total_deleted: number;
   running: boolean;
+  subsystem: SubsystemStatus | null;
 }
 
 export interface SkillSummary {
@@ -337,16 +333,36 @@ export interface ScheduleRunInfo {
   error: string | null;
 }
 
-export interface SchedulerStatus {
+export interface PulseStatus {
   enabled: boolean;
-  heartbeat_secs: number;
-  last_tick_at: string | null;
-  last_tick_due: number;
-  last_tick_executed: number;
-  total_ticks: number;
-  total_runs: number;
-  total_failures: number;
+  interval_secs: number;
   running: boolean;
+  total_ticks: number;
+  last_tick_at: string | null;
+  last_tick_duration_ms: number;
+  subsystems: SubsystemStatus[];
+}
+
+export interface SubsystemStatus {
+  name: string;
+  enabled: boolean;
+  total_runs: number;
+  total_processed: number;
+  total_failed: number;
+  last_run_at: string | null;
+  last_result: {
+    name: string;
+    checked: number;
+    processed: number;
+    failed: number;
+    duration_ms: number;
+    details: string | null;
+  } | null;
+}
+
+export interface SchedulerStatus {
+  running: boolean;
+  subsystem: SubsystemStatus | null;
 }
 
 export interface BackgroundTaskInfo {

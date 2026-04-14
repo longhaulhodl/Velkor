@@ -16,6 +16,7 @@ members = [
     "crates/tools",
     "crates/security",
     "crates/observability",
+    "crates/pulse",
 ]
 
 [workspace.package]
@@ -70,6 +71,7 @@ velkor-auth = { path = "crates/auth" }
 velkor-tools = { path = "crates/tools" }
 velkor-security = { path = "crates/security" }
 velkor-observability = { path = "crates/observability" }
+velkor-pulse = { path = "crates/pulse" }
 tokio.workspace = true
 axum.workspace = true
 serde.workspace = true

@@ -1,17 +1,13 @@
 [package]
-name = "velkor-retention"
+name = "velkor-pulse"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-velkor-pulse = { path = "../pulse" }
-velkor-db = { path = "../db" }
-velkor-audit = { path = "../audit" }
-serde.workspace = true
-sqlx.workspace = true
-uuid.workspace = true
 chrono.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 async-trait.workspace = true
