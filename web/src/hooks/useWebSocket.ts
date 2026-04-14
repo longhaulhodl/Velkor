@@ -1,6 +1,7 @@
 import { useRef, useCallback, useEffect } from 'react';
 import { useChatStore } from '../stores/chat';
 import { useAuthStore } from '../stores/auth';
+import { useNotificationStore } from '../stores/notifications';
 
 interface WsMessage {
   type: string;
@@ -13,6 +14,11 @@ interface WsMessage {
   error?: string;
   message?: string;
   position?: number;
+  // task_complete fields
+  task_id?: string;
+  title?: string;
+  result_summary?: string;
+  tokens_used?: number;
 }
 
 export function useWebSocket() {
@@ -29,6 +35,8 @@ export function useWebSocket() {
     setError,
     isStreaming,
   } = useChatStore();
+
+  const addTaskNotification = useNotificationStore((s) => s.addTaskNotification);
 
   const connect = useCallback(() => {
     if (!token) return;
@@ -81,6 +89,18 @@ export function useWebSocket() {
         case 'conversation_created':
           if (msg.conversation_id) setConversationId(msg.conversation_id);
           break;
+        case 'task_complete':
+          addTaskNotification({
+            task_id: msg.task_id!,
+            title: msg.title ?? 'Background task',
+            status: msg.status ?? 'completed',
+            result_summary: msg.result_summary,
+            conversation_id: msg.conversation_id,
+            error: msg.error,
+            tokens_used: msg.tokens_used ?? 0,
+          });
+          console.log(`[Velkor] Task completed: ${msg.title} (${msg.status})`);
+          break;
         case 'queued':
           // Message was queued server-side — keep isStreaming true, nothing to reset
           console.log(`[Velkor] Message queued at position ${msg.position}`);
@@ -102,7 +122,7 @@ export function useWebSocket() {
       console.log(`[Velkor] WebSocket closed: code=${event.code} reason=${event.reason}`);
       wsRef.current = null;
     };
-  }, [token, appendStreamText, finalizeAssistantMessage, setToolStatus, clearActiveTools, setStreaming, setConversationId, setError]);
+  }, [token, appendStreamText, finalizeAssistantMessage, setToolStatus, clearActiveTools, setStreaming, setConversationId, setError, addTaskNotification]);
 
   const sendMessage = useCallback(
     (content: string, conversationId?: string | null) => {

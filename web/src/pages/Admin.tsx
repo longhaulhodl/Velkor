@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { api, type AuditEntry, type RetentionStatus, type SkillSummary, type LearnedSkill, type SkillDetail, type ScheduleInfo, type ScheduleRunInfo, type SchedulerStatus } from '../lib/api';
+import { api, type AuditEntry, type RetentionStatus, type SkillSummary, type LearnedSkill, type SkillDetail, type ScheduleInfo, type ScheduleRunInfo, type SchedulerStatus, type BackgroundTaskInfo, type AgentInfo } from '../lib/api';
 
 const EVENT_TYPES = [
   '', // all
@@ -422,6 +422,280 @@ function SkillsTab() {
   );
 }
 
+function StatusBadge({ status }: { status: string }) {
+  const colors: Record<string, string> = {
+    pending: 'bg-zinc-700 text-zinc-300',
+    running: 'bg-yellow-900/50 text-yellow-300',
+    completed: 'bg-green-900/50 text-green-300',
+    failed: 'bg-red-900/50 text-red-300',
+    cancelled: 'bg-zinc-800 text-zinc-500',
+  };
+  const cls = colors[status] || 'bg-zinc-800 text-zinc-400';
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded text-xs font-mono ${cls}`}>
+      {status}
+    </span>
+  );
+}
+
+function TasksTab() {
+  const queryClient = useQueryClient();
+  const [showSpawn, setShowSpawn] = useState(false);
+  const [viewingTask, setViewingTask] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const [spawnForm, setSpawnForm] = useState({
+    title: '', task_prompt: '', agent_id: 'default',
+  });
+
+  const { data: tasks, isLoading } = useQuery({
+    queryKey: ['tasks'],
+    queryFn: () => api.listTasks(),
+    refetchInterval: 10000,
+  });
+
+  const { data: agentsData } = useQuery({
+    queryKey: ['agents'],
+    queryFn: () => api.listAgents(),
+  });
+
+  const selectedTask = (tasks ?? []).find((t) => t.id === viewingTask);
+
+  const handleSpawn = async () => {
+    setError('');
+    try {
+      await api.spawnTask({
+        title: spawnForm.title,
+        task_prompt: spawnForm.task_prompt,
+        agent_id: spawnForm.agent_id || 'default',
+      });
+      setShowSpawn(false);
+      setSpawnForm({ title: '', task_prompt: '', agent_id: 'default' });
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to spawn task');
+    }
+  };
+
+  const handleCancel = async (id: string) => {
+    if (!confirm('Cancel this task?')) return;
+    try {
+      await api.cancelTask(id);
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : 'Failed');
+    }
+  };
+
+  // Task detail view
+  if (viewingTask && selectedTask) {
+    const duration = selectedTask.started_at && selectedTask.completed_at
+      ? `${((new Date(selectedTask.completed_at).getTime() - new Date(selectedTask.started_at).getTime()) / 1000).toFixed(1)}s`
+      : selectedTask.status === 'running' ? 'running...' : '-';
+
+    return (
+      <div className="space-y-4">
+        <button onClick={() => setViewingTask(null)} className="text-zinc-400 hover:text-white text-sm">
+          &larr; Back to tasks
+        </button>
+
+        <div className="border border-zinc-800 rounded-lg p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <h3 className="text-lg font-medium">{selectedTask.title}</h3>
+              <StatusBadge status={selectedTask.status} />
+            </div>
+            {(selectedTask.status === 'pending' || selectedTask.status === 'running') && (
+              <button
+                onClick={() => handleCancel(selectedTask.id)}
+                className="text-xs text-red-400 hover:text-red-300 border border-red-900 rounded px-3 py-1"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-4 gap-4 text-xs text-zinc-500">
+            <div>
+              <span className="block text-zinc-600">Agent</span>
+              {selectedTask.agent_id}
+            </div>
+            <div>
+              <span className="block text-zinc-600">Duration</span>
+              {duration}
+            </div>
+            <div>
+              <span className="block text-zinc-600">Tokens</span>
+              {selectedTask.tokens_used ?? '-'}
+            </div>
+            <div>
+              <span className="block text-zinc-600">Created</span>
+              {formatTimestamp(selectedTask.created_at)}
+            </div>
+          </div>
+
+          <div>
+            <h4 className="text-xs text-zinc-600 mb-1">Task Prompt</h4>
+            <div className="bg-zinc-900 rounded-lg p-4 text-sm text-zinc-300 whitespace-pre-wrap font-mono max-h-40 overflow-auto">
+              {selectedTask.task_prompt}
+            </div>
+          </div>
+
+          {selectedTask.result_summary && (
+            <div>
+              <h4 className="text-xs text-zinc-600 mb-1">Result</h4>
+              <div className="bg-zinc-900 rounded-lg p-4 text-sm text-zinc-300 whitespace-pre-wrap font-mono max-h-60 overflow-auto">
+                {selectedTask.result_summary}
+              </div>
+            </div>
+          )}
+
+          {selectedTask.error && (
+            <div>
+              <h4 className="text-xs text-red-600 mb-1">Error</h4>
+              <div className="bg-red-900/20 border border-red-900 rounded-lg p-4 text-sm text-red-300 whitespace-pre-wrap font-mono">
+                {selectedTask.error}
+              </div>
+            </div>
+          )}
+
+          {selectedTask.conversation_id && (
+            <p className="text-xs text-zinc-600">
+              Conversation: <span className="font-mono text-zinc-500">{selectedTask.conversation_id}</span>
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Spawn form
+  if (showSpawn) {
+    const agents = agentsData?.agents ?? [];
+    return (
+      <div className="space-y-4">
+        <button onClick={() => setShowSpawn(false)} className="text-zinc-400 hover:text-white text-sm">
+          &larr; Back to tasks
+        </button>
+        <div className="border border-zinc-800 rounded-lg p-6 space-y-4">
+          <h3 className="text-sm font-medium text-zinc-300">Spawn Background Task</h3>
+          {error && (
+            <div className="bg-red-900/30 border border-red-800 rounded-lg px-4 py-2 text-sm text-red-300">{error}</div>
+          )}
+          <input
+            type="text" placeholder="Task title"
+            value={spawnForm.title}
+            onChange={(e) => setSpawnForm((f) => ({ ...f, title: e.target.value }))}
+            className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-zinc-500"
+          />
+          <select
+            value={spawnForm.agent_id}
+            onChange={(e) => setSpawnForm((f) => ({ ...f, agent_id: e.target.value }))}
+            className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-zinc-500"
+          >
+            {agents.length > 0
+              ? agents.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.id} ({a.model}){a.is_supervisor ? ' [supervisor]' : ''}
+                  </option>
+                ))
+              : <option value="default">default</option>
+            }
+          </select>
+          <textarea
+            placeholder="Task prompt — what the agent should do"
+            value={spawnForm.task_prompt}
+            onChange={(e) => setSpawnForm((f) => ({ ...f, task_prompt: e.target.value }))}
+            rows={8}
+            className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-zinc-500 font-mono"
+          />
+          <div className="flex gap-3">
+            <button
+              onClick={handleSpawn}
+              disabled={!spawnForm.title || !spawnForm.task_prompt}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-sm transition-colors"
+            >
+              Spawn Task
+            </button>
+            <button onClick={() => setShowSpawn(false)} className="px-4 py-2 text-zinc-400 hover:text-zinc-300 text-sm">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Tasks list
+  const list = tasks ?? [];
+  const running = list.filter((t) => t.status === 'running').length;
+  const pending = list.filter((t) => t.status === 'pending').length;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4 text-xs text-zinc-500">
+          <span>{list.length} task{list.length !== 1 ? 's' : ''}</span>
+          {running > 0 && <span className="text-yellow-400">{running} running</span>}
+          {pending > 0 && <span className="text-zinc-400">{pending} pending</span>}
+        </div>
+        <button
+          onClick={() => setShowSpawn(true)}
+          className="text-xs text-white bg-blue-600 hover:bg-blue-500 rounded px-3 py-1.5"
+        >
+          + Spawn Task
+        </button>
+      </div>
+
+      {isLoading && <p className="text-zinc-600 text-sm">Loading tasks...</p>}
+
+      <div className="border border-zinc-800 rounded-lg overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-zinc-900/50 text-zinc-500 text-xs uppercase tracking-wide">
+              <th className="text-left px-4 py-2 font-medium">Title</th>
+              <th className="text-left px-4 py-2 font-medium">Agent</th>
+              <th className="text-left px-4 py-2 font-medium">Status</th>
+              <th className="text-left px-4 py-2 font-medium">Created</th>
+              <th className="text-right px-4 py-2 font-medium">Tokens</th>
+              <th className="text-right px-4 py-2 font-medium">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.length === 0 && !isLoading && (
+              <tr><td colSpan={6} className="text-center py-8 text-zinc-600">No background tasks yet</td></tr>
+            )}
+            {list.map((task) => (
+              <tr key={task.id} className="border-t border-zinc-800/50 hover:bg-zinc-900/30">
+                <td className="px-4 py-2">
+                  <div className="text-zinc-300 text-sm truncate max-w-xs">{task.title}</div>
+                </td>
+                <td className="px-4 py-2 text-xs text-zinc-400 font-mono">{task.agent_id}</td>
+                <td className="px-4 py-2"><StatusBadge status={task.status} /></td>
+                <td className="px-4 py-2 text-xs text-zinc-400 font-mono whitespace-nowrap">
+                  {formatTimestamp(task.created_at)}
+                </td>
+                <td className="px-4 py-2 text-right text-xs text-zinc-500 font-mono">
+                  {task.tokens_used ?? '-'}
+                </td>
+                <td className="px-4 py-2 text-right space-x-2">
+                  <button onClick={() => setViewingTask(task.id)} className="text-xs text-blue-400 hover:text-blue-300">
+                    View
+                  </button>
+                  {(task.status === 'pending' || task.status === 'running') && (
+                    <button onClick={() => handleCancel(task.id)} className="text-xs text-red-400 hover:text-red-300">
+                      Cancel
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function SchedulesTab() {
   const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
@@ -714,7 +988,7 @@ function SchedulesTab() {
 
 export default function Admin() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'audit' | 'retention' | 'skills' | 'schedules'>('audit');
+  const [activeTab, setActiveTab] = useState<'audit' | 'tasks' | 'schedules' | 'retention' | 'skills'>('audit');
   const [eventFilter, setEventFilter] = useState('');
   const [page, setPage] = useState(0);
   const pageSize = 50;
@@ -765,9 +1039,9 @@ export default function Admin() {
       <div className="max-w-6xl mx-auto py-6 px-4">
         {/* Tabs */}
         <div className="flex gap-1 mb-6 border-b border-zinc-800">
-          {(['audit', 'schedules', 'retention', 'skills'] as const).map((tab) => {
+          {(['audit', 'tasks', 'schedules', 'retention', 'skills'] as const).map((tab) => {
             const labels: Record<string, string> = {
-              audit: 'Audit Log', schedules: 'Schedules', retention: 'Retention', skills: 'Skills',
+              audit: 'Audit Log', tasks: 'Tasks', schedules: 'Schedules', retention: 'Retention', skills: 'Skills',
             };
             return (
               <button
@@ -870,6 +1144,8 @@ export default function Admin() {
             </div>
           </div>
         )}
+
+        {activeTab === 'tasks' && <TasksTab />}
 
         {activeTab === 'schedules' && <SchedulesTab />}
 

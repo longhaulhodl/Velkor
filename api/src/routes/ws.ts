@@ -5,6 +5,8 @@ import { verifyToken } from "../middleware/auth.js";
 import { chatStream } from "../lib/core-client.js";
 import type { AuthUser, WsClientMessage, WsServerMessage } from "../lib/types.js";
 
+const CORE_URL = process.env.CORE_URL ?? "http://localhost:3001";
+
 const app = new Hono();
 
 // Node.js WebSocket adapter for Hono
@@ -32,6 +34,7 @@ app.get(
     let user: AuthUser | null = null;
     let busy = false;
     const messageQueue: WsClientMessage[] = [];
+    let taskAbort: AbortController | null = null;
 
     return {
       onOpen(_event: Event, ws: WSContext) {
@@ -49,6 +52,9 @@ app.get(
           ws.close(4001, "Invalid token");
           return;
         }
+
+        // Subscribe to task notifications for this user
+        taskAbort = subscribeTaskNotifications(ws, user);
       },
 
       async onMessage(event: MessageEvent, ws: WSContext) {
@@ -90,6 +96,9 @@ app.get(
       onClose() {
         // Clear the queue on disconnect
         messageQueue.length = 0;
+        // Abort the task notification SSE subscription
+        taskAbort?.abort();
+        taskAbort = null;
       },
 
       onError(event: Event) {
@@ -252,6 +261,64 @@ function sendJson(ws: WSContext, msg: WsServerMessage) {
   } catch {
     // Client may have disconnected
   }
+}
+
+/**
+ * Subscribe to task completion notifications from the Rust core via SSE.
+ * Forwards task_complete events to the user's WebSocket connection.
+ * Returns an AbortController so the caller can cancel the subscription.
+ */
+function subscribeTaskNotifications(ws: WSContext, user: AuthUser): AbortController {
+  const controller = new AbortController();
+  const url = `${CORE_URL}/internal/tasks/notifications?user_id=${user.id}`;
+
+  (async () => {
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      if (!response.ok || !response.body) return;
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() ?? "";
+
+        for (const event of events) {
+          if (!event.includes("event: task_complete")) continue;
+          const dataLine = event.split("\n").find((l) => l.startsWith("data: "));
+          if (!dataLine) continue;
+
+          try {
+            const data = JSON.parse(dataLine.slice(6));
+            sendJson(ws, {
+              type: "task_complete",
+              task_id: data.task_id,
+              title: data.title,
+              status: data.status,
+              result_summary: data.result_summary,
+              conversation_id: data.conversation_id,
+              error: data.error,
+              tokens_used: data.tokens_used ?? 0,
+            });
+          } catch {
+            // Skip malformed events
+          }
+        }
+      }
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        console.error("[ws] Task notification subscription error:", err);
+      }
+    }
+  })();
+
+  return controller;
 }
 
 export { app as wsApp, injectWebSocket };

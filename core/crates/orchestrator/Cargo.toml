@@ -5,7 +5,18 @@ edition.workspace = true
 
 [dependencies]
 velkor-runtime = { path = "../runtime" }
+velkor-memory = { path = "../memory" }
+velkor-models = { path = "../models" }
+velkor-tools = { path = "../tools" }
+velkor-audit = { path = "../audit" }
 velkor-config = { path = "../config" }
+velkor-skills = { path = "../skills" }
+sqlx.workspace = true
+chrono.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+async-trait.workspace = true

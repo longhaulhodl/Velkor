@@ -42,6 +42,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 async-trait = "0.1"
 futures = "0.3"
+async-stream = "0.3"
 anyhow = "1"
 thiserror = "2"
 pgvector = { version = "0.4", features = ["sqlx"] }
@@ -79,6 +80,7 @@ chrono.workspace = true
 futures.workspace = true
 async-trait.workspace = true
 tokio-stream = "0.1"
+async-stream.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 anyhow.workspace = true

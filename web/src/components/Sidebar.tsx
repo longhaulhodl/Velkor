@@ -3,10 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { api, type Conversation } from '../lib/api';
 import { useChatStore } from '../stores/chat';
 import { useAuthStore } from '../stores/auth';
+import { useNotificationStore } from '../stores/notifications';
 
 export default function Sidebar() {
   const { conversationId, setConversationId, loadMessages, reset } = useChatStore();
   const logout = useAuthStore((s) => s.logout);
+  const unreadNotifications = useNotificationStore((s) => s.notifications.filter((n) => !n.dismissed).length);
+  const dismissAll = useNotificationStore((s) => s.dismissAll);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -107,10 +110,18 @@ export default function Sidebar() {
             Settings
           </button>
           <button
-            onClick={() => navigate('/admin')}
-            className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors"
+            onClick={() => {
+              dismissAll();
+              navigate('/admin');
+            }}
+            className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors relative"
           >
             Admin
+            {unreadNotifications > 0 && (
+              <span className="absolute -top-1 -right-3 inline-flex items-center justify-center w-4 h-4 text-[10px] font-bold text-white bg-blue-600 rounded-full">
+                {unreadNotifications > 9 ? '9+' : unreadNotifications}
+              </span>
+            )}
           </button>
         </div>
         <button

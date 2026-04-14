@@ -122,13 +122,13 @@ impl MemoryBackend for PostgresMemory {
                         COALESCE(f.category, v.category) AS category,
                         COALESCE(f.confidence, v.confidence) AS confidence,
                         COALESCE(f.created_at, v.created_at) AS created_at,
-                        COALESCE(1.0 / (60 + ROW_NUMBER() OVER (ORDER BY f.fts_score DESC NULLS LAST)), 0) AS fts_rrf,
-                        COALESCE(1.0 / (60 + ROW_NUMBER() OVER (ORDER BY v.vec_score DESC NULLS LAST)), 0) AS vec_rrf
+                        COALESCE((1.0 / (60 + ROW_NUMBER() OVER (ORDER BY f.fts_score DESC NULLS LAST)))::float8, 0) AS fts_rrf,
+                        COALESCE((1.0 / (60 + ROW_NUMBER() OVER (ORDER BY v.vec_score DESC NULLS LAST)))::float8, 0) AS vec_rrf
                     FROM fts_results f
                     FULL OUTER JOIN vector_results v ON f.id = v.id
                 )
                 SELECT id, content, scope, category, confidence, created_at,
-                       (fts_rrf + vec_rrf) AS combined_score
+                       (fts_rrf + vec_rrf)::float8 AS combined_score
                 FROM combined
                 ORDER BY combined_score DESC
                 LIMIT $5

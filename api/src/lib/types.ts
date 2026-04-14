@@ -22,4 +22,5 @@ export type WsServerMessage =
   | { type: "done"; request_id: string; iterations: number; usage: { input_tokens: number; output_tokens: number } }
   | { type: "error"; message: string }
   | { type: "conversation_created"; conversation_id: string }
-  | { type: "queued"; position: number };
+  | { type: "queued"; position: number }
+  | { type: "task_complete"; task_id: string; title: string; status: string; result_summary?: string; conversation_id?: string; error?: string; tokens_used: number };

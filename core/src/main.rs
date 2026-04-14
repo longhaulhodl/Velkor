@@ -1,4 +1,5 @@
 mod routes;
+mod schedule_tools;
 
 use anyhow::Result;
 use std::sync::Arc;
@@ -19,6 +20,8 @@ pub struct AppState {
     pub skill_store: SkillStoreHandle,
     pub retention_status: velkor_retention::RetentionStatusHandle,
     pub scheduler_status: velkor_scheduler::SchedulerStatusHandle,
+    pub orchestrator: Option<velkor_orchestrator::OrchestratorHandle>,
+    pub task_notifier: velkor_orchestrator::tasks::TaskNotifier,
 }
 
 #[tokio::main]
@@ -204,6 +207,24 @@ async fn main() -> Result<()> {
         }
     };
 
+    // Delegation tools — lazy orchestrator handle set after orchestrator is built
+    let lazy_orch = velkor_orchestrator::delegation::lazy_orchestrator();
+    {
+        tracing::info!("Registered tools: delegate_to_agent, delegate_parallel");
+        tools.register(Box::new(
+            velkor_orchestrator::delegation::DelegationTool::new(
+                lazy_orch.clone(),
+                pool.clone(),
+            ),
+        ));
+        tools.register(Box::new(
+            velkor_orchestrator::delegation::ParallelDelegationTool::new(
+                lazy_orch.clone(),
+                pool.clone(),
+            ),
+        ));
+    }
+
     // Skills tools (installable SKILL.md + learned DB skills)
     let skill_store: SkillStoreHandle = {
         let skills_cfg = config
@@ -239,6 +260,22 @@ async fn main() -> Result<()> {
 
         handle
     };
+
+    // Schedule management tools (cron CRUD from chat)
+    {
+        let sched_enabled = config
+            .scheduling
+            .as_ref()
+            .map(|s| s.enabled)
+            .unwrap_or(true);
+        if sched_enabled {
+            tracing::info!("Registered tools: schedule_list, schedule_create, schedule_update, schedule_delete");
+            tools.register(Box::new(schedule_tools::ScheduleListTool::new(pool.clone())));
+            tools.register(Box::new(schedule_tools::ScheduleCreateTool::new(pool.clone())));
+            tools.register(Box::new(schedule_tools::ScheduleUpdateTool::new(pool.clone())));
+            tools.register(Box::new(schedule_tools::ScheduleDeleteTool::new(pool.clone())));
+        }
+    }
 
     tracing::info!(count = tools.len(), names = ?tools.tool_names(), "Tool registry ready");
     let tools = Arc::new(tools);
@@ -282,6 +319,32 @@ async fn main() -> Result<()> {
         model = runtime_config.model,
         tool_list = tool_names.join(", "),
     );
+
+    // Load agent definitions early so we can include them in the system prompt
+    let agents_dir = std::path::Path::new("agents");
+    let agent_configs: Vec<velkor_config::AgentConfig> = if agents_dir.is_dir() {
+        velkor_config::load_all_agents(agents_dir).unwrap_or_default()
+    } else {
+        vec![]
+    };
+
+    // If we have specialized agents, add delegation instructions to the system prompt
+    if !agent_configs.is_empty() {
+        system_prompt.push_str("\n\n## Multi-Agent Delegation\n\n\
+            You are the supervisor agent. You can delegate tasks to specialized agents \
+            using the `delegate_to_agent` tool (single agent) or `delegate_parallel` tool \
+            (multiple agents simultaneously). Decide whether to handle a request yourself \
+            or delegate based on the task complexity and agent expertise.\n\n\
+            Available agents:\n");
+        for ac in &agent_configs {
+            system_prompt.push_str(&format!(
+                "- **{}** (model: {}): {}\n",
+                ac.agent.id,
+                ac.agent.model,
+                ac.agent.description.as_deref().unwrap_or("General-purpose agent"),
+            ));
+        }
+    }
 
     // Append skills index (progressive disclosure tier 1: names + descriptions)
     {
@@ -342,6 +405,47 @@ async fn main() -> Result<()> {
         Arc::clone(&scheduler_status),
     );
 
+    // Build orchestrator from the agent definitions loaded earlier
+    let orchestrator: Option<velkor_orchestrator::OrchestratorHandle> = {
+        let mut orch = velkor_orchestrator::Orchestrator::new("default");
+        // Always register the default runtime
+        orch.register_agent("default", Arc::clone(&runtime));
+
+        if !agent_configs.is_empty() {
+            for ac in &agent_configs {
+                let agent_runtime = velkor_orchestrator::build_agent_runtime(
+                    &ac.agent,
+                    &config.platform.name,
+                    Arc::clone(&runtime.model_router),
+                    Arc::clone(&runtime.memory),
+                    runtime.audit.clone(),
+                    Arc::clone(&runtime.tools),
+                );
+                let agent_runtime = Arc::new(
+                    agent_runtime.with_skill_store(Arc::clone(&skill_store))
+                );
+                orch.register_agent(&ac.agent.id, agent_runtime);
+            }
+            tracing::info!(
+                agents = orch.agent_count(),
+                "Orchestrator initialized with agents from agents/ directory"
+            );
+        } else {
+            tracing::info!("No agent definitions — single-agent mode");
+        }
+
+        let orch_handle = Arc::new(orch);
+
+        // Set the lazy orchestrator handle so delegation tools become active
+        let _ = lazy_orch.set(Arc::clone(&orch_handle));
+        tracing::info!("Delegation tools bound to orchestrator");
+
+        if !agent_configs.is_empty() { Some(orch_handle) } else { None }
+    };
+
+    // Task notification channel (for WebSocket push when background tasks complete)
+    let task_notifier = velkor_orchestrator::tasks::new_notifier();
+
     let state = AppState {
         pool: pool.clone(),
         memory,
@@ -351,6 +455,8 @@ async fn main() -> Result<()> {
         skill_store,
         retention_status,
         scheduler_status,
+        orchestrator,
+        task_notifier,
     };
 
     // Build router

@@ -390,3 +390,39 @@ export async function listScheduleRuns(
 export async function getSchedulerStatus(): Promise<unknown> {
   return coreRequest("/internal/schedules/status");
 }
+
+// ---------------------------------------------------------------------------
+// Tasks
+// ---------------------------------------------------------------------------
+
+export async function listTasks(userId?: string, limit = 50): Promise<unknown> {
+  const params = new URLSearchParams();
+  if (userId) params.set("user_id", userId);
+  params.set("limit", String(limit));
+  return coreRequest(`/internal/tasks?${params}`);
+}
+
+export async function getTask(id: string): Promise<unknown> {
+  return coreRequest(`/internal/tasks/${id}`);
+}
+
+export async function spawnTask(body: {
+  user_id: string;
+  agent_id?: string;
+  title: string;
+  task_prompt: string;
+  source_conversation_id?: string;
+}): Promise<unknown> {
+  return coreRequest("/internal/tasks", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function cancelTask(id: string): Promise<void> {
+  await coreRequest(`/internal/tasks/${id}/cancel`, { method: "POST" });
+}
+
+export async function listAgents(): Promise<unknown> {
+  return coreRequest("/internal/tasks/agents");
+}

@@ -6,6 +6,7 @@ pub mod audit;
 pub mod retention;
 pub mod schedules;
 pub mod skills;
+pub mod tasks;
 pub mod users;
 
 use axum::{routing::get, Json, Router};
@@ -23,6 +24,7 @@ pub fn internal_router() -> Router<AppState> {
         .nest("/internal/retention", retention::router())
         .nest("/internal/schedules", schedules::router())
         .nest("/internal/skills", skills::router())
+        .nest("/internal/tasks", tasks::router())
         .nest("/internal/users", users::router())
 }
 

@@ -169,6 +169,30 @@ export const api = {
   getSchedulerStatus: () =>
     request<SchedulerStatus>('/schedules/status'),
 
+  // Tasks
+  listTasks: (limit = 50) =>
+    request<BackgroundTaskInfo[]>(`/tasks?limit=${limit}`),
+
+  getTask: (id: string) =>
+    request<BackgroundTaskInfo>(`/tasks/${id}`),
+
+  spawnTask: (body: {
+    title: string;
+    task_prompt: string;
+    agent_id?: string;
+    source_conversation_id?: string;
+  }) =>
+    request<{ task_id: string; status: string }>('/tasks', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  cancelTask: (id: string) =>
+    request<{ cancelled: boolean }>(`/tasks/${id}/cancel`, { method: 'POST' }),
+
+  listAgents: () =>
+    request<{ agents: AgentInfo[]; supervisor: string }>('/tasks/agents'),
+
   // Audit
   searchAudit: async (params: {
     event_type?: string;
@@ -323,6 +347,30 @@ export interface SchedulerStatus {
   total_runs: number;
   total_failures: number;
   running: boolean;
+}
+
+export interface BackgroundTaskInfo {
+  id: string;
+  user_id: string;
+  agent_id: string;
+  title: string;
+  task_prompt: string;
+  status: string;
+  result_summary: string | null;
+  conversation_id: string | null;
+  source_conversation_id: string | null;
+  tokens_used: number | null;
+  cost_usd: number | null;
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface AgentInfo {
+  id: string;
+  model: string;
+  is_supervisor: boolean;
 }
 
 export interface AuditEntry {
