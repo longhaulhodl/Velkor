@@ -5,6 +5,7 @@ import { useAuthStore } from './stores/auth';
 import Login from './pages/Login';
 import Chat from './pages/Chat';
 import Settings from './pages/Settings';
+import Admin from './pages/Admin';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -33,6 +34,14 @@ export default function App() {
             element={
               <AuthGate>
                 <Settings />
+              </AuthGate>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <AuthGate>
+                <Admin />
               </AuthGate>
             }
           />

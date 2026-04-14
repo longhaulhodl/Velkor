@@ -84,8 +84,21 @@ export const api = {
   deleteDocument: (id: string) =>
     request<void>(`/documents/${id}`, { method: 'DELETE' }),
 
-  deleteConversation: (id: string) =>
-    request<void>(`/conversations/${id}`, { method: 'DELETE' }),
+  // Audit
+  searchAudit: async (params: {
+    event_type?: string;
+    from?: string;
+    to?: string;
+    limit?: number;
+    offset?: number;
+  } = {}) => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined) qs.set(k, String(v));
+    }
+    const res = await request<{ entries: AuditEntry[] }>(`/audit?${qs}`);
+    return res.entries;
+  },
 };
 
 // Types
@@ -130,4 +143,19 @@ export interface MemoryResult {
   confidence: number;
   score: number;
   created_at: string;
+}
+
+export interface AuditEntry {
+  id: string;
+  timestamp: string;
+  event_type: string;
+  user_id: string | null;
+  agent_id: string | null;
+  conversation_id: string | null;
+  details: Record<string, unknown>;
+  model_used: string | null;
+  tokens_input: number | null;
+  tokens_output: number | null;
+  cost_usd: number | null;
+  request_id: string | null;
 }

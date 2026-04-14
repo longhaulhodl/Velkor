@@ -249,11 +249,22 @@ async fn main() -> Result<()> {
         doc_store,
     };
 
-    // Start retention background task
-    let _retention_handle = velkor_retention::spawn_retention_task(
-        pool,
-        velkor_retention::RetentionConfig::default(),
-    );
+    // Start retention background task with config from YAML
+    let retention_config = {
+        let mut rc = velkor_retention::RetentionConfig::default();
+        if let Some(ref ret) = config.retention {
+            if let Some(days) = ret.default_conversation_days {
+                rc.default_retention_days = days as i64;
+            }
+            if !ret.auto_purge {
+                // If auto_purge is disabled, set interval very high (effectively off)
+                rc.interval_secs = 86400 * 365;
+            }
+            rc.hard_delete = false; // always soft-delete for safety
+        }
+        rc
+    };
+    let _retention_handle = velkor_retention::spawn_retention_task(pool.clone(), retention_config);
 
     // Build router
     let app = routes::internal_router().with_state(state);

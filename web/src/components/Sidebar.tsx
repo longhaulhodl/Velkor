@@ -99,12 +99,20 @@ export default function Sidebar() {
       </div>
 
       <div className="p-3 border-t border-zinc-800 flex items-center justify-between">
-        <button
-          onClick={() => navigate('/settings')}
-          className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors"
-        >
-          Settings
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate('/settings')}
+            className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors"
+          >
+            Settings
+          </button>
+          <button
+            onClick={() => navigate('/admin')}
+            className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors"
+          >
+            Admin
+          </button>
+        </div>
         <button
           onClick={logout}
           className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors"
