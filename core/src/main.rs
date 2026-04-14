@@ -1,3 +1,4 @@
+mod maintenance;
 mod routes;
 mod schedule_tools;
 
@@ -148,7 +149,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Memory tools (store + search)
+    // Memory tools (store + search + update + forget)
     {
         let mem_enabled = config
             .tools
@@ -157,9 +158,11 @@ async fn main() -> Result<()> {
             .map(|m| m.enabled)
             .unwrap_or(true);
         if mem_enabled {
-            tracing::info!("Registered tools: memory_store, memory_search");
+            tracing::info!("Registered tools: memory_store, memory_search, memory_update, memory_forget");
             tools.register(Box::new(velkor_tools::builtin::memory::MemoryStoreTool::new(Arc::clone(&memory))));
             tools.register(Box::new(velkor_tools::builtin::memory::MemorySearchTool::new(Arc::clone(&memory))));
+            tools.register(Box::new(velkor_tools::builtin::memory::MemoryUpdateTool::new(Arc::clone(&memory))));
+            tools.register(Box::new(velkor_tools::builtin::memory::MemoryForgetTool::new(Arc::clone(&memory))));
         }
     }
 
@@ -313,7 +316,19 @@ async fn main() -> Result<()> {
          Be concise, accurate, and helpful. If you don't know something, say so \
          rather than making up information. \
          When using tool results, present the information faithfully — \
-         do not fabricate details beyond what the tool returned.",
+         do not fabricate details beyond what the tool returned.\n\n\
+         ## Memory Guidelines\n\n\
+         You have persistent memory across conversations. Core memories (high-importance \
+         facts about the user) are automatically loaded into your context.\n\n\
+         When you learn something durable about the user — their name, role, preferences, \
+         project details, technical environment — store it using memory_store with an \
+         appropriate category and importance score.\n\n\
+         Before storing, always distill to a concise standalone fact. Never store raw \
+         conversation text, ephemeral queries, or debugging output.\n\n\
+         If a fact changes, use memory_search to find the old memory, then memory_update \
+         to correct it — or memory_forget to remove outdated information.\n\n\
+         Use memory_search proactively when the user references prior conversations \
+         or when context from past interactions would help.",
         name = config.platform.name,
         model = runtime_config.model,
         tool_list = tool_names.join(", "),
@@ -424,6 +439,11 @@ async fn main() -> Result<()> {
             ),
         ));
     }
+
+    // Subsystem 3: Memory maintenance (runs every ~6 hours)
+    pulse.register(Box::new(
+        maintenance::MemoryMaintenanceSubsystem::new(pool.clone(), pulse_interval_secs),
+    ));
 
     // Spawn the unified pulse engine
     let _pulse_handle = pulse.spawn();

@@ -3,17 +3,48 @@ use crate::{
     MemoryError, MemoryRecord, MemoryResult, MemoryScope, NewMemory,
 };
 use std::sync::Arc;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
+
+/// Minimum importance threshold — memories below this are rejected.
+const MIN_IMPORTANCE: i16 = 3;
+
+/// Cosine similarity threshold for deduplication.
+/// If a new memory is >= this similar to an existing one, update instead of add.
+const DEDUP_SIMILARITY_THRESHOLD: f64 = 0.92;
+
+/// Minimum importance to qualify as a "core memory" (always in prompt).
+const CORE_MEMORY_IMPORTANCE: i16 = 8;
+
+/// Max core memories injected into the system prompt.
+const CORE_MEMORY_LIMIT: usize = 15;
 
 /// High-level memory service that agents interact with.
 ///
 /// Wraps a `MemoryBackend` and an `EmbeddingProvider` so that callers never
 /// need to generate embeddings manually — `store()`, `update()`, and `search()`
 /// all handle embedding automatically.
+///
+/// Includes quality gates:
+/// - Importance threshold: rejects memories scored below MIN_IMPORTANCE
+/// - Deduplication: detects near-duplicate memories and updates instead of adding
+/// - Core memories: high-importance memories auto-injected into prompts
 pub struct MemoryService {
     backend: Arc<dyn MemoryBackend>,
     embedder: Arc<dyn EmbeddingProvider>,
+}
+
+/// Result of a store operation — either a new memory was created,
+/// an existing one was updated (dedup), or the memory was rejected.
+#[derive(Debug, serde::Serialize)]
+#[serde(tag = "action", rename_all = "lowercase")]
+pub enum StoreResult {
+    /// New memory created with this ID.
+    Created(#[serde(rename = "id")] Uuid),
+    /// Existing memory updated (dedup hit). Contains the existing memory's ID.
+    Updated(#[serde(rename = "id")] Uuid),
+    /// Memory rejected (importance too low).
+    Rejected { reason: String },
 }
 
 impl MemoryService {
@@ -21,7 +52,12 @@ impl MemoryService {
         Self { backend, embedder }
     }
 
-    /// Store a new memory. Automatically generates the embedding from `content`.
+    /// Store a new memory with quality gates:
+    /// 1. Reject if importance < MIN_IMPORTANCE
+    /// 2. Generate embedding
+    /// 3. Check for near-duplicates via cosine similarity
+    /// 4. If duplicate found, update existing memory instead
+    /// 5. Otherwise, create new memory
     pub async fn store(
         &self,
         user_id: Uuid,
@@ -29,17 +65,58 @@ impl MemoryService {
         scope: MemoryScope,
         category: Option<MemoryCategory>,
         source_conversation_id: Option<Uuid>,
-    ) -> Result<Uuid, MemoryError> {
+        importance: i16,
+    ) -> Result<StoreResult, MemoryError> {
+        // Gate 1: importance threshold
+        if importance < MIN_IMPORTANCE {
+            debug!(importance, min = MIN_IMPORTANCE, "Memory rejected: importance too low");
+            return Ok(StoreResult::Rejected {
+                reason: format!(
+                    "Importance {} is below minimum threshold {}. Only store durable, \
+                     referenceable facts — not ephemeral queries or conversation chatter.",
+                    importance, MIN_IMPORTANCE
+                ),
+            });
+        }
+
+        // Generate embedding
         let embedding = match self.embedder.embed(content).await {
             Ok(emb) => Some(emb),
             Err(e) => {
-                // Embedding failure is non-fatal — store without embedding,
-                // FTS still works. Log and continue.
                 warn!(error = %e, "Failed to generate embedding, storing without vector");
                 None
             }
         };
 
+        // Gate 2: deduplication via cosine similarity
+        if let Some(ref emb) = embedding {
+            match self
+                .backend
+                .find_similar(emb, user_id, scope, DEDUP_SIMILARITY_THRESHOLD, 1)
+                .await
+            {
+                Ok(similar) => {
+                    if let Some(existing) = similar.first() {
+                        // Near-duplicate found — update the existing memory
+                        info!(
+                            existing_id = %existing.id,
+                            similarity = existing.score,
+                            "Dedup: updating existing memory instead of creating duplicate"
+                        );
+                        self.backend
+                            .update(existing.id, content, Some(emb))
+                            .await?;
+                        return Ok(StoreResult::Updated(existing.id));
+                    }
+                }
+                Err(e) => {
+                    // Dedup check failed — log and proceed with store
+                    warn!(error = %e, "Dedup check failed, storing anyway");
+                }
+            }
+        }
+
+        // Create new memory
         let memory = NewMemory {
             user_id,
             org_id: None,
@@ -49,11 +126,12 @@ impl MemoryService {
             embedding,
             source_conversation_id,
             confidence: 1.0,
+            importance,
         };
 
         let id = self.backend.store(&memory).await?;
-        debug!(%id, %scope, "Memory stored");
-        Ok(id)
+        debug!(%id, %scope, importance, "Memory stored");
+        Ok(StoreResult::Created(id))
     }
 
     /// Hybrid search: embeds the query, then runs FTS + vector search with RRF.
@@ -127,6 +205,16 @@ impl MemoryService {
 
         self.backend
             .search_history(query, embedding.as_deref(), user_id, limit)
+            .await
+    }
+
+    /// Retrieve core memories (high-importance) for system prompt injection.
+    pub async fn get_core_memories(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<MemoryResult>, MemoryError> {
+        self.backend
+            .get_core_memories(user_id, CORE_MEMORY_IMPORTANCE, CORE_MEMORY_LIMIT)
             .await
     }
 

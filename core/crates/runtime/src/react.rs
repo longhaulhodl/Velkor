@@ -128,8 +128,18 @@ impl AgentRuntime {
     ) -> Result<AgentResponse, RuntimeError> {
         let request_id = Uuid::new_v4();
 
-        // 1. Recall relevant memories
-        let memories = self
+        // 1. Load core memories (high-importance, always-present)
+        let core_memories = self
+            .memory
+            .get_core_memories(context.user_id)
+            .await
+            .unwrap_or_else(|e| {
+                warn!(error = %e, "Core memory load failed");
+                Vec::new()
+            });
+
+        // 2. Recall query-relevant memories, excluding IDs already in core
+        let recalled = self
             .memory
             .search(
                 user_message,
@@ -142,12 +152,15 @@ impl AgentRuntime {
                 warn!(error = %e, "Memory recall failed, proceeding without memories");
                 Vec::new()
             });
+        // Dedup: remove recalled memories that are already in core set
+        let core_ids: std::collections::HashSet<_> = core_memories.iter().map(|m| m.id).collect();
+        let recalled: Vec<_> = recalled.into_iter().filter(|m| !core_ids.contains(&m.id)).collect();
 
-        debug!(count = memories.len(), "Recalled memories for agent turn");
+        debug!(core = core_memories.len(), recalled = recalled.len(), "Loaded memories for agent turn");
 
-        // 2. Build system message + append user message
+        // 3. Build system message + append user message
         let system_msg =
-            PromptBuilder::build_system_prompt(&self.config.system_prompt, &memories);
+            PromptBuilder::build_system_prompt(&self.config.system_prompt, &core_memories, &recalled);
         context.push(PromptBuilder::user_message(user_message));
 
         self.audit.log_async(
@@ -329,8 +342,18 @@ impl AgentRuntime {
     ) -> Result<AgentResponse, RuntimeError> {
         let request_id = Uuid::new_v4();
 
-        // Recall memories
-        let memories = self
+        // Load core memories (high-importance, always-present)
+        let core_memories = self
+            .memory
+            .get_core_memories(context.user_id)
+            .await
+            .unwrap_or_else(|e| {
+                warn!(error = %e, "Core memory load failed");
+                Vec::new()
+            });
+
+        // Recall query-relevant memories
+        let recalled = self
             .memory
             .search(
                 user_message,
@@ -343,9 +366,12 @@ impl AgentRuntime {
                 warn!(error = %e, "Memory recall failed, proceeding without memories");
                 Vec::new()
             });
+        // Dedup: remove recalled memories that are already in core set
+        let core_ids: std::collections::HashSet<_> = core_memories.iter().map(|m| m.id).collect();
+        let recalled: Vec<_> = recalled.into_iter().filter(|m| !core_ids.contains(&m.id)).collect();
 
         let system_msg =
-            PromptBuilder::build_system_prompt(&self.config.system_prompt, &memories);
+            PromptBuilder::build_system_prompt(&self.config.system_prompt, &core_memories, &recalled);
         context.push(PromptBuilder::user_message(user_message));
 
         self.audit.log_async(
@@ -757,24 +783,35 @@ impl AgentRuntime {
                     )
                 };
 
+                // Auto-extracted memories get low importance (3) — the quality
+                // gate and dedup will handle filtering and merging.
                 match memory
-                    .store(user_id, &summary, scope, None, Some(conversation_id))
+                    .store(user_id, &summary, scope, None, Some(conversation_id), 3)
                     .await
                 {
-                    Ok(id) => {
-                        debug!(memory_id = %id, "Auto-extracted memory from conversation");
-                        audit.log_async(
-                            AuditEntryBuilder::new(AuditEvent::AgentMemoryStored)
-                                .user_id(user_id)
-                                .agent_id(&agent_id)
-                                .conversation_id(conversation_id)
-                                .request_id(request_id)
-                                .details(serde_json::json!({
-                                    "memory_id": id.to_string(),
-                                    "auto_extracted": true,
-                                }))
-                                .build(),
-                        );
+                    Ok(result) => {
+                        let result_desc = match &result {
+                            velkor_memory::service::StoreResult::Created(id) => format!("created {id}"),
+                            velkor_memory::service::StoreResult::Updated(id) => format!("updated {id}"),
+                            velkor_memory::service::StoreResult::Rejected { reason } => format!("rejected: {reason}"),
+                        };
+                        debug!(result = %result_desc, "Auto-memory extraction");
+                        if let velkor_memory::service::StoreResult::Created(id)
+                            | velkor_memory::service::StoreResult::Updated(id) = result
+                        {
+                            audit.log_async(
+                                AuditEntryBuilder::new(AuditEvent::AgentMemoryStored)
+                                    .user_id(user_id)
+                                    .agent_id(&agent_id)
+                                    .conversation_id(conversation_id)
+                                    .request_id(request_id)
+                                    .details(serde_json::json!({
+                                        "memory_id": id.to_string(),
+                                        "auto_extracted": true,
+                                    }))
+                                    .build(),
+                            );
+                        }
                     }
                     Err(e) => {
                         warn!(error = %e, "Failed to auto-extract memory");

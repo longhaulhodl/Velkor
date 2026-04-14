@@ -74,6 +74,8 @@ pub struct MemoryRecord {
     pub embedding: Option<Vec<f32>>,
     pub source_conversation_id: Option<Uuid>,
     pub confidence: f32,
+    /// Importance score: 1 (trivial) to 10 (critical). Default 5.
+    pub importance: i16,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -89,6 +91,8 @@ pub struct NewMemory {
     pub embedding: Option<Vec<f32>>,
     pub source_conversation_id: Option<Uuid>,
     pub confidence: f32,
+    /// Importance score: 1 (trivial) to 10 (critical).
+    pub importance: i16,
 }
 
 /// A search result with relevance score.
@@ -99,6 +103,7 @@ pub struct MemoryResult {
     pub scope: MemoryScope,
     pub category: Option<MemoryCategory>,
     pub confidence: f32,
+    pub importance: i16,
     /// Combined RRF score from hybrid search (higher = more relevant).
     pub score: f64,
     pub created_at: DateTime<Utc>,
@@ -188,6 +193,27 @@ pub trait MemoryBackend: Send + Sync {
         user_id: Uuid,
         limit: usize,
     ) -> Result<Vec<HistoryResult>, MemoryError>;
+
+    /// Find memories similar to the given embedding (cosine similarity).
+    /// Used for pre-storage dedup: if a near-duplicate exists, update instead of add.
+    /// Returns memories with similarity >= threshold, sorted by similarity desc.
+    async fn find_similar(
+        &self,
+        embedding: &[f32],
+        user_id: Uuid,
+        scope: MemoryScope,
+        threshold: f64,
+        limit: usize,
+    ) -> Result<Vec<MemoryResult>, MemoryError>;
+
+    /// Retrieve high-importance memories (importance >= min_importance) for a user.
+    /// These are "core memories" that should be injected into the system prompt.
+    async fn get_core_memories(
+        &self,
+        user_id: Uuid,
+        min_importance: i16,
+        limit: usize,
+    ) -> Result<Vec<MemoryResult>, MemoryError>;
 
     /// Hard-delete all memories for a user (GDPR erasure). Returns count deleted.
     async fn purge_user(&self, user_id: Uuid) -> Result<u64, MemoryError>;

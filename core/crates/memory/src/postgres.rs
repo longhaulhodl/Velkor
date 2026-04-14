@@ -59,8 +59,8 @@ impl MemoryBackend for PostgresMemory {
         let row = sqlx::query_scalar::<_, Uuid>(
             r#"
             INSERT INTO memories (user_id, org_id, scope, category, content, embedding,
-                                  source_conversation_id, confidence)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                                  source_conversation_id, confidence, importance)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING id
             "#,
         )
@@ -72,10 +72,11 @@ impl MemoryBackend for PostgresMemory {
         .bind(embedding)
         .bind(memory.source_conversation_id)
         .bind(memory.confidence)
+        .bind(memory.importance)
         .fetch_one(&self.pool)
         .await?;
 
-        debug!(id = %row, scope = scope_str, "Stored new memory");
+        debug!(id = %row, scope = scope_str, importance = memory.importance, "Stored new memory");
         Ok(row)
     }
 
@@ -97,7 +98,7 @@ impl MemoryBackend for PostgresMemory {
             let rows = sqlx::query_as::<_, HybridRow>(
                 r#"
                 WITH fts_results AS (
-                    SELECT id, content, scope, category, confidence, created_at,
+                    SELECT id, content, scope, category, confidence, importance, created_at,
                            ts_rank(search_vector, plainto_tsquery('english', $1)) AS fts_score
                     FROM memories
                     WHERE search_vector @@ plainto_tsquery('english', $1)
@@ -106,7 +107,7 @@ impl MemoryBackend for PostgresMemory {
                     LIMIT 20
                 ),
                 vector_results AS (
-                    SELECT id, content, scope, category, confidence, created_at,
+                    SELECT id, content, scope, category, confidence, importance, created_at,
                            1 - (embedding <=> $4::vector) AS vec_score
                     FROM memories
                     WHERE user_id = $2 AND scope = $3 AND NOT is_deleted
@@ -121,13 +122,14 @@ impl MemoryBackend for PostgresMemory {
                         COALESCE(f.scope, v.scope) AS scope,
                         COALESCE(f.category, v.category) AS category,
                         COALESCE(f.confidence, v.confidence) AS confidence,
+                        COALESCE(f.importance, v.importance) AS importance,
                         COALESCE(f.created_at, v.created_at) AS created_at,
                         COALESCE((1.0 / (60 + ROW_NUMBER() OVER (ORDER BY f.fts_score DESC NULLS LAST)))::float8, 0) AS fts_rrf,
                         COALESCE((1.0 / (60 + ROW_NUMBER() OVER (ORDER BY v.vec_score DESC NULLS LAST)))::float8, 0) AS vec_rrf
                     FROM fts_results f
                     FULL OUTER JOIN vector_results v ON f.id = v.id
                 )
-                SELECT id, content, scope, category, confidence, created_at,
+                SELECT id, content, scope, category, confidence, importance, created_at,
                        (fts_rrf + vec_rrf)::float8 AS combined_score
                 FROM combined
                 ORDER BY combined_score DESC
@@ -147,7 +149,7 @@ impl MemoryBackend for PostgresMemory {
             // FTS-only fallback
             let rows = sqlx::query_as::<_, FtsRow>(
                 r#"
-                SELECT id, content, scope, category, confidence, created_at,
+                SELECT id, content, scope, category, confidence, importance, created_at,
                        ts_rank(search_vector, plainto_tsquery('english', $1)) AS fts_score
                 FROM memories
                 WHERE search_vector @@ plainto_tsquery('english', $1)
@@ -171,7 +173,7 @@ impl MemoryBackend for PostgresMemory {
         let row = sqlx::query_as::<_, MemoryRow>(
             r#"
             SELECT id, user_id, org_id, scope, category, content,
-                   embedding, source_conversation_id, confidence,
+                   embedding, source_conversation_id, confidence, importance,
                    created_at, updated_at
             FROM memories
             WHERE id = $1 AND NOT is_deleted
@@ -336,6 +338,92 @@ impl MemoryBackend for PostgresMemory {
             .collect())
     }
 
+    async fn find_similar(
+        &self,
+        embedding: &[f32],
+        user_id: Uuid,
+        scope: MemoryScope,
+        threshold: f64,
+        limit: usize,
+    ) -> Result<Vec<MemoryResult>, MemoryError> {
+        let vec = Vector::from(embedding.to_vec());
+        let scope_str = scope.as_str();
+        let limit_i64 = limit as i64;
+
+        let rows = sqlx::query_as::<_, SimilarRow>(
+            r#"
+            SELECT id, content, scope, category, confidence, importance, created_at,
+                   (1 - (embedding <=> $1::vector))::float8 AS similarity
+            FROM memories
+            WHERE user_id = $2 AND scope = $3 AND NOT is_deleted
+              AND embedding IS NOT NULL
+              AND (1 - (embedding <=> $1::vector)) >= $4
+            ORDER BY similarity DESC
+            LIMIT $5
+            "#,
+        )
+        .bind(&vec)
+        .bind(user_id)
+        .bind(scope_str)
+        .bind(threshold)
+        .bind(limit_i64)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| MemoryResult {
+                id: r.id,
+                content: r.content,
+                scope: parse_scope(&r.scope),
+                category: r.category.as_deref().and_then(parse_category),
+                confidence: r.confidence,
+                importance: r.importance,
+                score: r.similarity,
+                created_at: r.created_at,
+            })
+            .collect())
+    }
+
+    async fn get_core_memories(
+        &self,
+        user_id: Uuid,
+        min_importance: i16,
+        limit: usize,
+    ) -> Result<Vec<MemoryResult>, MemoryError> {
+        let limit_i64 = limit as i64;
+
+        let rows = sqlx::query_as::<_, CoreRow>(
+            r#"
+            SELECT id, content, scope, category, confidence, importance, created_at
+            FROM memories
+            WHERE user_id = $1 AND NOT is_deleted
+              AND importance >= $2
+            ORDER BY importance DESC, updated_at DESC
+            LIMIT $3
+            "#,
+        )
+        .bind(user_id)
+        .bind(min_importance)
+        .bind(limit_i64)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| MemoryResult {
+                id: r.id,
+                content: r.content,
+                scope: parse_scope(&r.scope),
+                category: r.category.as_deref().and_then(parse_category),
+                confidence: r.confidence,
+                importance: r.importance,
+                score: r.importance as f64 / 10.0,
+                created_at: r.created_at,
+            })
+            .collect())
+    }
+
     async fn purge_user(&self, user_id: Uuid) -> Result<u64, MemoryError> {
         // Hard delete — for GDPR right-to-erasure.
         let result = sqlx::query(
@@ -371,6 +459,7 @@ struct HybridRow {
     scope: String,
     category: Option<String>,
     confidence: f32,
+    importance: i16,
     created_at: DateTime<Utc>,
     combined_score: f64,
 }
@@ -383,6 +472,7 @@ impl HybridRow {
             scope: parse_scope(&self.scope),
             category: self.category.as_deref().and_then(parse_category),
             confidence: self.confidence,
+            importance: self.importance,
             score: self.combined_score,
             created_at: self.created_at,
         }
@@ -396,6 +486,7 @@ struct FtsRow {
     scope: String,
     category: Option<String>,
     confidence: f32,
+    importance: i16,
     created_at: DateTime<Utc>,
     fts_score: f32,
 }
@@ -408,10 +499,34 @@ impl FtsRow {
             scope: parse_scope(&self.scope),
             category: self.category.as_deref().and_then(parse_category),
             confidence: self.confidence,
+            importance: self.importance,
             score: self.fts_score as f64,
             created_at: self.created_at,
         }
     }
+}
+
+#[derive(sqlx::FromRow)]
+struct SimilarRow {
+    id: Uuid,
+    content: String,
+    scope: String,
+    category: Option<String>,
+    confidence: f32,
+    importance: i16,
+    created_at: DateTime<Utc>,
+    similarity: f64,
+}
+
+#[derive(sqlx::FromRow)]
+struct CoreRow {
+    id: Uuid,
+    content: String,
+    scope: String,
+    category: Option<String>,
+    confidence: f32,
+    importance: i16,
+    created_at: DateTime<Utc>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -425,6 +540,7 @@ struct MemoryRow {
     embedding: Option<Vector>,
     source_conversation_id: Option<Uuid>,
     confidence: f32,
+    importance: i16,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -441,6 +557,7 @@ impl MemoryRow {
             embedding: self.embedding.map(|v| v.to_vec()),
             source_conversation_id: self.source_conversation_id,
             confidence: self.confidence,
+            importance: self.importance,
             created_at: self.created_at,
             updated_at: self.updated_at,
         }

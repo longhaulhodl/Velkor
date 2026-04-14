@@ -22,6 +22,7 @@ struct StoreRequest {
     content: String,
     scope: String,
     category: Option<String>,
+    importance: Option<i16>,
     source_conversation_id: Option<Uuid>,
 }
 
@@ -31,8 +32,9 @@ async fn store_memory(
 ) -> Result<Json<serde_json::Value>, axum::http::StatusCode> {
     let scope = parse_scope(&req.scope);
     let category = req.category.as_deref().and_then(parse_category);
+    let importance = req.importance.unwrap_or(5);
 
-    let id = state
+    let result = state
         .memory
         .store(
             req.user_id,
@@ -40,11 +42,22 @@ async fn store_memory(
             scope,
             category,
             req.source_conversation_id,
+            importance,
         )
         .await
         .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok(Json(serde_json::json!({ "id": id })))
+    match result {
+        velkor_memory::service::StoreResult::Created(id) => {
+            Ok(Json(serde_json::json!({ "id": id, "action": "created" })))
+        }
+        velkor_memory::service::StoreResult::Updated(id) => {
+            Ok(Json(serde_json::json!({ "id": id, "action": "updated" })))
+        }
+        velkor_memory::service::StoreResult::Rejected { reason } => {
+            Ok(Json(serde_json::json!({ "action": "rejected", "reason": reason })))
+        }
+    }
 }
 
 #[derive(Deserialize)]
