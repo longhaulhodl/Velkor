@@ -52,6 +52,38 @@ pub struct ToolsConfig {
     pub memory: Option<ToolToggle>,
     #[serde(default)]
     pub documents: Option<ToolToggle>,
+    #[serde(default)]
+    pub skills: Option<SkillsConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SkillsConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Directories to scan for installable SKILL.md files.
+    #[serde(default)]
+    pub directories: Vec<String>,
+    /// Enable background post-turn skill review (Hermes self-improvement pattern).
+    #[serde(default)]
+    pub self_improve: bool,
+    /// Minimum ReAct iterations before triggering skill review.
+    #[serde(default = "default_review_threshold")]
+    pub review_threshold: u32,
+}
+
+impl Default for SkillsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            directories: vec!["skills".into()],
+            self_improve: true,
+            review_threshold: 10,
+        }
+    }
+}
+
+fn default_review_threshold() -> u32 {
+    10
 }
 
 #[derive(Debug, Clone, Deserialize)]

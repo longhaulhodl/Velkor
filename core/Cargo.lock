@@ -3886,6 +3886,7 @@ dependencies = [
  "velkor-config",
  "velkor-memory",
  "velkor-models",
+ "velkor-skills",
  "velkor-tools",
 ]
 
@@ -3920,9 +3921,13 @@ dependencies = [
  "async-trait",
  "chrono",
  "pgvector",
+ "regex",
  "serde",
  "serde_json",
+ "serde_yaml",
  "sqlx",
+ "thiserror 2.0.18",
+ "tokio",
  "tracing",
  "uuid",
  "velkor-db",
@@ -3937,12 +3942,14 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
  "uuid",
  "velkor-config",
  "velkor-documents",
  "velkor-memory",
  "velkor-models",
+ "velkor-skills",
 ]
 
 [[package]]

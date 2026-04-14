@@ -72,6 +72,12 @@ tools:
   web_fetch:
     enabled: true
     max_content_length: 50000
+  skills:
+    enabled: true
+    directories:
+      - "skills"              # relative to working dir, or absolute paths
+    self_improve: true        # Hermes-style background post-turn skill review
+    review_threshold: 10      # min ReAct iterations before triggering review
 
 channels:
   web:

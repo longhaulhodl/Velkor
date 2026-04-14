@@ -8,6 +8,7 @@ velkor-models = { path = "../models" }
 velkor-config = { path = "../config" }
 velkor-memory = { path = "../memory" }
 velkor-documents = { path = "../documents" }
+velkor-skills = { path = "../skills" }
 serde.workspace = true
 serde_json.workspace = true
 async-trait.workspace = true
@@ -15,3 +16,4 @@ reqwest.workspace = true
 uuid.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
+tokio.workspace = true

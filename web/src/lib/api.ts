@@ -88,6 +88,50 @@ export const api = {
   getRetentionStatus: () =>
     request<RetentionStatus>('/retention/status'),
 
+  // Skills
+  listSkills: () =>
+    request<{ skills: SkillSummary[] }>('/skills'),
+
+  listLearnedSkills: () =>
+    request<{ skills: LearnedSkill[] }>('/skills/learned'),
+
+  listInstallableSkills: () =>
+    request<{ skills: SkillSummary[] }>('/skills/installable'),
+
+  viewSkill: (name: string) =>
+    request<SkillDetail>(`/skills/${encodeURIComponent(name)}/view`),
+
+  createLearnedSkill: (body: { name: string; description?: string; content: string; category?: string }) =>
+    request<{ id: string; name: string; version: number }>('/skills/learned', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  patchLearnedSkill: (name: string, body: { content: string; description?: string }) =>
+    request<{ name: string; version: number }>(`/skills/learned/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  deactivateLearnedSkill: (name: string) =>
+    request<{ deactivated: string }>(`/skills/learned/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    }),
+
+  createInstallableSkill: (body: { name: string; description: string; content: string; version?: string; author?: string }) =>
+    request<{ name: string; path: string }>('/skills/installable', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  deleteInstallableSkill: (name: string) =>
+    request<{ deleted: string }>(`/skills/installable/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    }),
+
+  reloadInstallableSkills: () =>
+    request<{ reloaded: number }>('/skills/reload', { method: 'POST' }),
+
   // Audit
   searchAudit: async (params: {
     event_type?: string;
@@ -160,6 +204,43 @@ export interface RetentionStatus {
   total_sweeps: number;
   total_deleted: number;
   running: boolean;
+}
+
+export interface SkillSummary {
+  name: string;
+  description: string;
+  source: 'installed' | 'learned';
+}
+
+export interface LearnedSkill {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string | null;
+  author: string;
+  usage_count: number;
+  success_rate: number;
+  version: number;
+  is_active: boolean;
+  created_at: string;
+  last_used_at: string | null;
+  last_improved_at: string | null;
+}
+
+export interface SkillDetail {
+  name: string;
+  description: string | null;
+  version: string | number | null;
+  author: string | null;
+  source: 'installed' | 'learned';
+  content: string;
+  source_path?: string;
+  category?: string;
+  usage_count?: number;
+  success_rate?: number;
+  created_at?: string;
+  last_used_at?: string | null;
+  last_improved_at?: string | null;
 }
 
 export interface AuditEntry {

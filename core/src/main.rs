@@ -6,6 +6,7 @@ use velkor_audit::logger::AuditLogger;
 use velkor_documents::store::DocumentStore;
 use velkor_memory::service::MemoryService;
 use velkor_runtime::react::AgentRuntime;
+use velkor_tools::builtin::skills::SkillStoreHandle;
 
 /// Shared application state available to all axum handlers.
 #[derive(Clone)]
@@ -15,6 +16,7 @@ pub struct AppState {
     pub audit: AuditLogger,
     pub runtime: Arc<AgentRuntime>,
     pub doc_store: Option<Arc<DocumentStore>>,
+    pub skill_store: SkillStoreHandle,
     pub retention_status: velkor_retention::RetentionStatusHandle,
 }
 
@@ -201,6 +203,42 @@ async fn main() -> Result<()> {
         }
     };
 
+    // Skills tools (installable SKILL.md + learned DB skills)
+    let skill_store: SkillStoreHandle = {
+        let skills_cfg = config
+            .tools
+            .as_ref()
+            .and_then(|t| t.skills.clone())
+            .unwrap_or_default();
+
+        let skill_dirs: Vec<std::path::PathBuf> = if skills_cfg.directories.is_empty() {
+            vec![std::path::PathBuf::from("skills")]
+        } else {
+            skills_cfg.directories.iter().map(std::path::PathBuf::from).collect()
+        };
+
+        let mut store = velkor_skills::store::SkillStore::new(pool.clone(), skill_dirs);
+        let loaded = store.load_installable_skills();
+        tracing::info!(count = loaded, "Loaded installable skills from disk");
+
+        let handle: SkillStoreHandle = Arc::new(tokio::sync::RwLock::new(store));
+
+        if skills_cfg.enabled {
+            tracing::info!("Registered tools: skill_list, skill_view, skill_manage");
+            tools.register(Box::new(
+                velkor_tools::builtin::skills::SkillListTool::new(Arc::clone(&handle)),
+            ));
+            tools.register(Box::new(
+                velkor_tools::builtin::skills::SkillViewTool::new(Arc::clone(&handle)),
+            ));
+            tools.register(Box::new(
+                velkor_tools::builtin::skills::SkillManageTool::new(Arc::clone(&handle)),
+            ));
+        }
+
+        handle
+    };
+
     tracing::info!(count = tools.len(), names = ?tools.tool_names(), "Tool registry ready");
     let tools = Arc::new(tools);
 
@@ -218,8 +256,18 @@ async fn main() -> Result<()> {
 
     let mut runtime_config = velkor_runtime::react::RuntimeConfig::default();
     runtime_config.model = default_model;
+
+    // Wire skill review config
+    {
+        let skills_cfg = config
+            .tools
+            .as_ref()
+            .and_then(|t| t.skills.as_ref());
+        runtime_config.skill_self_improve = skills_cfg.map(|s| s.self_improve).unwrap_or(true);
+        runtime_config.skill_review_threshold = skills_cfg.map(|s| s.review_threshold).unwrap_or(10);
+    }
     let tool_names: Vec<&str> = tools.tool_names();
-    runtime_config.system_prompt = format!(
+    let mut system_prompt = format!(
         "You are {name}, a helpful AI assistant.\n\n\
          Runtime: platform={name} | model={model} | tools={tool_list}\n\n\
          You have access to tools and should use them proactively. \
@@ -234,13 +282,26 @@ async fn main() -> Result<()> {
         tool_list = tool_names.join(", "),
     );
 
-    let runtime = Arc::new(AgentRuntime::new(
-        runtime_config,
-        model_router,
-        Arc::clone(&memory),
-        audit.clone(),
-        tools,
-    ));
+    // Append skills index (progressive disclosure tier 1: names + descriptions)
+    {
+        let store = skill_store.read().await;
+        if let Some(skills_block) = velkor_skills::index::build_skills_prompt(&store).await {
+            system_prompt.push_str("\n\n");
+            system_prompt.push_str(&skills_block);
+        }
+    }
+    runtime_config.system_prompt = system_prompt;
+
+    let runtime = Arc::new(
+        AgentRuntime::new(
+            runtime_config,
+            model_router,
+            Arc::clone(&memory),
+            audit.clone(),
+            tools,
+        )
+        .with_skill_store(Arc::clone(&skill_store)),
+    );
 
     // Start retention background task with config from YAML
     let retention_config = {
@@ -269,6 +330,7 @@ async fn main() -> Result<()> {
         audit,
         runtime,
         doc_store,
+        skill_store,
         retention_status,
     };
 

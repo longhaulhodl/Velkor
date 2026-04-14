@@ -16,8 +16,12 @@ use velkor_models::{
     ChatRequest, ContentBlock, LlmResponse, Message, MessageContent, Role, StopReason,
     StreamChunk, ToolCall, Usage,
 };
+use velkor_skills::store::SkillStore;
 use velkor_tools::registry::ToolRegistry;
 use velkor_tools::ToolContext;
+
+/// Shared handle to the skill store for background skill review.
+pub type SkillStoreHandle = std::sync::Arc<tokio::sync::RwLock<SkillStore>>;
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -40,6 +44,10 @@ pub struct RuntimeConfig {
     pub max_tokens: Option<u32>,
     /// Memory scope for this agent's searches.
     pub memory_scope: MemoryScope,
+    /// Enable background post-turn skill review (Hermes pattern).
+    pub skill_self_improve: bool,
+    /// Minimum ReAct iterations before triggering skill review.
+    pub skill_review_threshold: u32,
 }
 
 impl Default for RuntimeConfig {
@@ -52,6 +60,8 @@ impl Default for RuntimeConfig {
             temperature: Some(0.7),
             max_tokens: Some(4096),
             memory_scope: MemoryScope::Personal,
+            skill_self_improve: true,
+            skill_review_threshold: 10,
         }
     }
 }
@@ -83,6 +93,7 @@ pub struct AgentRuntime {
     pub memory: Arc<MemoryService>,
     pub audit: AuditLogger,
     pub tools: Arc<ToolRegistry>,
+    pub skill_store: Option<SkillStoreHandle>,
 }
 
 impl AgentRuntime {
@@ -99,7 +110,13 @@ impl AgentRuntime {
             memory,
             audit,
             tools,
+            skill_store: None,
         }
+    }
+
+    pub fn with_skill_store(mut self, store: SkillStoreHandle) -> Self {
+        self.skill_store = Some(store);
+        self
     }
 
     /// Non-streaming ReAct loop. Returns the final response after all tool
@@ -703,6 +720,18 @@ impl AgentRuntime {
         context: &ConversationContext,
         request_id: Uuid,
     ) {
+        self.spawn_memory_extraction(user_message, response_text, context, request_id);
+        self.spawn_skill_review(context, request_id);
+    }
+
+    /// Background memory extraction (auto-store substantive conversation facts).
+    fn spawn_memory_extraction(
+        &self,
+        user_message: &str,
+        response_text: &str,
+        context: &ConversationContext,
+        request_id: Uuid,
+    ) {
         let memory = Arc::clone(&self.memory);
         let audit = self.audit.clone();
         let user_id = context.user_id;
@@ -713,9 +742,6 @@ impl AgentRuntime {
         let resp_text = response_text.to_string();
 
         tokio::spawn(async move {
-            // --- 1. Auto-extract facts from the conversation ---
-            // Phase 1: simple heuristic — store if the response is substantive.
-            // Phase 2 will use LLM-based extraction for structured facts.
             if resp_text.len() > 100 {
                 let summary = if resp_text.len() > 500 {
                     format!(
@@ -755,14 +781,244 @@ impl AgentRuntime {
                     }
                 }
             }
+        });
+    }
 
-            // --- 2. Update user profile ---
-            // Phase 2: extract preferences, communication style, expertise from
-            // conversation patterns. Placeholder for now.
+    /// Background skill review (Hermes pattern): after complex tasks with many
+    /// iterations, spawn a review that analyzes the conversation and considers
+    /// creating or updating a learned skill.
+    ///
+    /// Trigger: iterations >= skill_review_threshold AND skill_self_improve is on.
+    /// The review uses the model router to make a single LLM call with the
+    /// conversation summary + review prompt, then parses the response for
+    /// skill create/patch actions.
+    fn spawn_skill_review(
+        &self,
+        context: &ConversationContext,
+        request_id: Uuid,
+    ) {
+        if !self.config.skill_self_improve {
+            return;
+        }
+        let skill_store = match &self.skill_store {
+            Some(s) => Arc::clone(s),
+            None => return,
+        };
 
-            // --- 3. Skill reflection ---
-            // Phase 2: if the agent solved a novel problem with a reusable tool
-            // chain, consider creating/updating a skill. Placeholder for now.
+        // Build a summary of the conversation for the review agent
+        let mut conversation_summary = String::new();
+        let mut iteration_count = 0u32;
+        for msg in &context.messages {
+            let role_str = match msg.role {
+                Role::User => "User",
+                Role::Assistant => "Assistant",
+                Role::System | Role::Tool => continue,
+            };
+            let content_str = match &msg.content {
+                MessageContent::Text(t) => t.clone(),
+                MessageContent::Blocks(blocks) => {
+                    let mut parts = Vec::new();
+                    for block in blocks {
+                        match block {
+                            ContentBlock::Text { text } => parts.push(text.clone()),
+                            ContentBlock::ToolUse { name, .. } => {
+                                parts.push(format!("[tool_use: {name}]"));
+                                iteration_count += 1;
+                            }
+                            ContentBlock::ToolResult { content, .. } => {
+                                let truncated: String =
+                                    content.chars().take(200).collect();
+                                parts.push(format!("[tool_result: {truncated}...]"));
+                            }
+                        }
+                    }
+                    parts.join("\n")
+                }
+            };
+            conversation_summary.push_str(&format!("{role_str}: {content_str}\n\n"));
+        }
+
+        // Only trigger review if we hit the iteration threshold
+        if iteration_count < self.config.skill_review_threshold {
+            return;
+        }
+
+        let model_router = Arc::clone(&self.model_router);
+        let model = self.config.model.clone();
+        let audit = self.audit.clone();
+        let user_id = context.user_id;
+        let conversation_id = context.conversation_id;
+        let agent_id = context.agent_id.clone();
+
+        info!(
+            iterations = iteration_count,
+            threshold = self.config.skill_review_threshold,
+            "Triggering background skill review"
+        );
+
+        tokio::spawn(async move {
+            let review_prompt = velkor_skills::index::build_review_prompt();
+
+            // Summarize existing learned skills for context
+            let existing_skills = {
+                let store = skill_store.read().await;
+                let summaries = store.all_skill_summaries().await;
+                if summaries.is_empty() {
+                    "No existing skills.".to_string()
+                } else {
+                    summaries
+                        .iter()
+                        .map(|(name, desc, source)| format!("- {name} [{source}]: {desc}"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                }
+            };
+
+            let review_system = format!(
+                "{review_prompt}\n\n## Existing Skills\n{existing_skills}"
+            );
+
+            let messages = vec![
+                Message {
+                    role: Role::System,
+                    content: MessageContent::Text(review_system),
+                },
+                Message {
+                    role: Role::User,
+                    content: MessageContent::Text(format!(
+                        "Review this conversation and decide if a skill should be created or updated:\n\n{conversation_summary}"
+                    )),
+                },
+            ];
+
+            let request = ChatRequest {
+                model: &model,
+                messages: &messages,
+                tools: None,
+                temperature: Some(0.3),
+                max_tokens: Some(2048),
+                stream: false,
+            };
+
+            match model_router.chat(&request).await {
+                Ok(response) => {
+                    let text = response.content.trim().to_string();
+
+                    // If the model says nothing to save, we're done
+                    if text.to_lowercase().contains("nothing to save") {
+                        debug!("Skill review: nothing to save");
+                        return;
+                    }
+
+                    // Parse the response for skill actions.
+                    // The model should respond with structured instructions:
+                    //   ACTION: create|patch
+                    //   NAME: skill-name
+                    //   DESCRIPTION: ...
+                    //   CONTENT: ...
+                    let action = if text.contains("ACTION: create") {
+                        "create"
+                    } else if text.contains("ACTION: patch") {
+                        "patch"
+                    } else {
+                        debug!("Skill review response did not contain a clear action");
+                        return;
+                    };
+
+                    let name = extract_field(&text, "NAME:");
+                    let description = extract_field(&text, "DESCRIPTION:");
+                    let content = extract_field(&text, "CONTENT:");
+
+                    let (Some(name), Some(content)) = (name, content) else {
+                        debug!("Skill review: missing NAME or CONTENT in response");
+                        return;
+                    };
+
+                    let store = skill_store.write().await;
+                    match action {
+                        "create" => {
+                            match store
+                                .create_learned(
+                                    &name,
+                                    description.as_deref(),
+                                    &content,
+                                    None,
+                                    "skill-review",
+                                    Some(conversation_id),
+                                )
+                                .await
+                            {
+                                Ok(skill) => {
+                                    info!(
+                                        name = %skill.name,
+                                        id = %skill.id,
+                                        "Background skill review created new skill"
+                                    );
+                                    audit.log_async(
+                                        AuditEntryBuilder::new(AuditEvent::AgentToolResult)
+                                            .user_id(user_id)
+                                            .agent_id(&agent_id)
+                                            .conversation_id(conversation_id)
+                                            .request_id(request_id)
+                                            .details(serde_json::json!({
+                                                "skill_review": "created",
+                                                "skill_name": skill.name,
+                                                "skill_id": skill.id.to_string(),
+                                            }))
+                                            .build(),
+                                    );
+                                }
+                                Err(e) => {
+                                    warn!(error = %e, name = %name, "Failed to create skill from review");
+                                }
+                            }
+                        }
+                        "patch" => {
+                            match store.get_learned_by_name(&name).await {
+                                Ok(Some(existing)) => {
+                                    if let Err(e) = store
+                                        .patch_learned(existing.id, &content, description.as_deref())
+                                        .await
+                                    {
+                                        warn!(error = %e, name = %name, "Failed to patch skill from review");
+                                    } else {
+                                        info!(name = %name, "Background skill review patched skill");
+                                        audit.log_async(
+                                            AuditEntryBuilder::new(AuditEvent::AgentToolResult)
+                                                .user_id(user_id)
+                                                .agent_id(&agent_id)
+                                                .conversation_id(conversation_id)
+                                                .request_id(request_id)
+                                                .details(serde_json::json!({
+                                                    "skill_review": "patched",
+                                                    "skill_name": name,
+                                                }))
+                                                .build(),
+                                        );
+                                    }
+                                }
+                                _ => {
+                                    warn!(name = %name, "Skill review tried to patch non-existent skill, creating instead");
+                                    let _ = store
+                                        .create_learned(
+                                            &name,
+                                            description.as_deref(),
+                                            &content,
+                                            None,
+                                            "skill-review",
+                                            Some(conversation_id),
+                                        )
+                                        .await;
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Err(e) => {
+                    warn!(error = %e, "Background skill review model call failed");
+                }
+            }
         });
     }
 }
@@ -830,4 +1086,32 @@ pub struct AgentResponse {
     pub usage: Usage,
     /// Correlation ID for audit trail.
     pub request_id: Uuid,
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Extract a field value from a structured text response.
+/// Looks for "PREFIX value" and returns everything from the value to the next
+/// known field marker or end of text.
+fn extract_field(text: &str, prefix: &str) -> Option<String> {
+    let start = text.find(prefix)?;
+    let after = &text[start + prefix.len()..];
+
+    // Find the end: next field marker or end of text
+    let markers = ["ACTION:", "NAME:", "DESCRIPTION:", "CONTENT:"];
+    let end = markers
+        .iter()
+        .filter(|&&m| m != prefix)
+        .filter_map(|m| after.find(m))
+        .min()
+        .unwrap_or(after.len());
+
+    let value = after[..end].trim().to_string();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
 }

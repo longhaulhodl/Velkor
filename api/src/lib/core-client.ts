@@ -264,3 +264,74 @@ export async function searchAudit(params: {
 export async function getRetentionStatus(): Promise<unknown> {
   return coreRequest("/internal/retention/status");
 }
+
+// ---------------------------------------------------------------------------
+// Skills
+// ---------------------------------------------------------------------------
+
+export async function listSkills(): Promise<unknown> {
+  return coreRequest("/internal/skills");
+}
+
+export async function listLearnedSkills(): Promise<unknown> {
+  return coreRequest("/internal/skills/learned");
+}
+
+export async function listInstallableSkills(): Promise<unknown> {
+  return coreRequest("/internal/skills/installable");
+}
+
+export async function viewSkill(name: string): Promise<unknown> {
+  return coreRequest(`/internal/skills/${encodeURIComponent(name)}/view`);
+}
+
+export async function createLearnedSkill(body: {
+  name: string;
+  description?: string;
+  content: string;
+  category?: string;
+}): Promise<unknown> {
+  return coreRequest("/internal/skills/learned", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function patchLearnedSkill(
+  name: string,
+  body: { content: string; description?: string }
+): Promise<unknown> {
+  return coreRequest(`/internal/skills/learned/${encodeURIComponent(name)}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deactivateLearnedSkill(name: string): Promise<unknown> {
+  return coreRequest(`/internal/skills/learned/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function createInstallableSkill(body: {
+  name: string;
+  description: string;
+  content: string;
+  version?: string;
+  author?: string;
+}): Promise<unknown> {
+  return coreRequest("/internal/skills/installable", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteInstallableSkill(name: string): Promise<unknown> {
+  return coreRequest(`/internal/skills/installable/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function reloadInstallableSkills(): Promise<unknown> {
+  return coreRequest("/internal/skills/reload", { method: "POST" });
+}
