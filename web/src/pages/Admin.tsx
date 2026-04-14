@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { api, type AuditEntry, type RetentionStatus, type SkillSummary, type LearnedSkill, type SkillDetail } from '../lib/api';
+import { api, type AuditEntry, type RetentionStatus, type SkillSummary, type LearnedSkill, type SkillDetail, type ScheduleInfo, type ScheduleRunInfo, type SchedulerStatus } from '../lib/api';
 
 const EVENT_TYPES = [
   '', // all
@@ -422,9 +422,299 @@ function SkillsTab() {
   );
 }
 
+function SchedulesTab() {
+  const queryClient = useQueryClient();
+  const [showCreate, setShowCreate] = useState(false);
+  const [viewingRuns, setViewingRuns] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const [createForm, setCreateForm] = useState({
+    name: '', cron_expression: '', task_prompt: '', description: '', natural_language: '', agent_id: 'default',
+  });
+
+  const { data: schedules, isLoading } = useQuery({
+    queryKey: ['schedules'],
+    queryFn: () => api.listSchedules(),
+    refetchInterval: 30000,
+  });
+
+  const { data: schedulerStatus } = useQuery({
+    queryKey: ['scheduler-status'],
+    queryFn: () => api.getSchedulerStatus(),
+    refetchInterval: 30000,
+  });
+
+  const { data: runs } = useQuery({
+    queryKey: ['schedule-runs', viewingRuns],
+    queryFn: () => (viewingRuns ? api.listScheduleRuns(viewingRuns) : Promise.resolve([])),
+    enabled: !!viewingRuns,
+  });
+
+  const handleCreate = async () => {
+    setError('');
+    try {
+      await api.createSchedule({
+        name: createForm.name,
+        cron_expression: createForm.cron_expression,
+        task_prompt: createForm.task_prompt,
+        description: createForm.description || undefined,
+        natural_language: createForm.natural_language || undefined,
+        agent_id: createForm.agent_id || 'default',
+      });
+      setShowCreate(false);
+      setCreateForm({ name: '', cron_expression: '', task_prompt: '', description: '', natural_language: '', agent_id: 'default' });
+      queryClient.invalidateQueries({ queryKey: ['schedules'] });
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to create schedule');
+    }
+  };
+
+  const handleToggle = async (id: string, isActive: boolean) => {
+    try {
+      await api.updateSchedule(id, { is_active: !isActive });
+      queryClient.invalidateQueries({ queryKey: ['schedules'] });
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : 'Failed');
+    }
+  };
+
+  const handleDelete = async (id: string, name: string) => {
+    if (!confirm(`Delete schedule "${name}" and all its run history?`)) return;
+    try {
+      await api.deleteSchedule(id);
+      queryClient.invalidateQueries({ queryKey: ['schedules'] });
+      if (viewingRuns === id) setViewingRuns(null);
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : 'Failed');
+    }
+  };
+
+  // Run history view
+  if (viewingRuns) {
+    const schedule = (schedules ?? []).find((s) => s.id === viewingRuns);
+    return (
+      <div className="space-y-4">
+        <button onClick={() => setViewingRuns(null)} className="text-zinc-400 hover:text-white text-sm">
+          &larr; Back to schedules
+        </button>
+        <h3 className="text-sm font-medium text-zinc-300">
+          Run History: {schedule?.name ?? viewingRuns}
+        </h3>
+        <div className="border border-zinc-800 rounded-lg overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-zinc-900/50 text-zinc-500 text-xs uppercase tracking-wide">
+                <th className="text-left px-4 py-2 font-medium">Started</th>
+                <th className="text-left px-4 py-2 font-medium">Status</th>
+                <th className="text-left px-4 py-2 font-medium">Result</th>
+                <th className="text-right px-4 py-2 font-medium">Tokens</th>
+                <th className="text-right px-4 py-2 font-medium">Duration</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(runs ?? []).length === 0 && (
+                <tr><td colSpan={5} className="text-center py-8 text-zinc-600">No runs yet</td></tr>
+              )}
+              {(runs ?? []).map((run) => {
+                const duration = run.completed_at
+                  ? `${((new Date(run.completed_at).getTime() - new Date(run.started_at).getTime()) / 1000).toFixed(1)}s`
+                  : run.status === 'running' ? 'running...' : '-';
+                const statusColor = run.status === 'completed' ? 'text-green-400'
+                  : run.status === 'failed' ? 'text-red-400'
+                  : run.status === 'running' ? 'text-yellow-400' : 'text-zinc-500';
+                return (
+                  <tr key={run.id} className="border-t border-zinc-800/50 hover:bg-zinc-900/30">
+                    <td className="px-4 py-2 text-xs text-zinc-400 font-mono whitespace-nowrap">
+                      {formatTimestamp(run.started_at)}
+                    </td>
+                    <td className={`px-4 py-2 text-xs font-mono ${statusColor}`}>{run.status ?? '-'}</td>
+                    <td className="px-4 py-2 text-xs text-zinc-500 truncate max-w-xs">
+                      {run.error ? <span className="text-red-400">{run.error}</span> : (run.result_summary?.slice(0, 80) ?? '-')}
+                    </td>
+                    <td className="px-4 py-2 text-right text-xs text-zinc-500 font-mono">{run.tokens_used ?? '-'}</td>
+                    <td className="px-4 py-2 text-right text-xs text-zinc-500 font-mono">{duration}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  // Create form
+  if (showCreate) {
+    return (
+      <div className="space-y-4">
+        <button onClick={() => setShowCreate(false)} className="text-zinc-400 hover:text-white text-sm">
+          &larr; Back to schedules
+        </button>
+        <div className="border border-zinc-800 rounded-lg p-6 space-y-4">
+          <h3 className="text-sm font-medium text-zinc-300">Create New Schedule</h3>
+          {error && (
+            <div className="bg-red-900/30 border border-red-800 rounded-lg px-4 py-2 text-sm text-red-300">{error}</div>
+          )}
+          <input
+            type="text" placeholder="Schedule name"
+            value={createForm.name}
+            onChange={(e) => setCreateForm((f) => ({ ...f, name: e.target.value }))}
+            className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-zinc-500"
+          />
+          <input
+            type="text" placeholder="Description (optional)"
+            value={createForm.description}
+            onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))}
+            className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-zinc-500"
+          />
+          <div className="grid grid-cols-2 gap-3">
+            <input
+              type="text" placeholder="Cron expression (e.g. 0 7 * * 1-5)"
+              value={createForm.cron_expression}
+              onChange={(e) => setCreateForm((f) => ({ ...f, cron_expression: e.target.value }))}
+              className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-zinc-500 font-mono"
+            />
+            <input
+              type="text" placeholder="Natural language (e.g. weekdays at 7am)"
+              value={createForm.natural_language}
+              onChange={(e) => setCreateForm((f) => ({ ...f, natural_language: e.target.value }))}
+              className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-zinc-500"
+            />
+          </div>
+          <input
+            type="text" placeholder="Agent ID (default: default)"
+            value={createForm.agent_id}
+            onChange={(e) => setCreateForm((f) => ({ ...f, agent_id: e.target.value }))}
+            className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-zinc-500"
+          />
+          <textarea
+            placeholder="Task prompt — what the agent should do on each run"
+            value={createForm.task_prompt}
+            onChange={(e) => setCreateForm((f) => ({ ...f, task_prompt: e.target.value }))}
+            rows={6}
+            className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-zinc-500 font-mono"
+          />
+          <div className="flex gap-3">
+            <button
+              onClick={handleCreate}
+              disabled={!createForm.name || !createForm.cron_expression || !createForm.task_prompt}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-sm transition-colors"
+            >
+              Create Schedule
+            </button>
+            <button onClick={() => setShowCreate(false)} className="px-4 py-2 text-zinc-400 hover:text-zinc-300 text-sm">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Schedules list
+  const list = schedules ?? [];
+
+  return (
+    <div className="space-y-4">
+      {/* Scheduler status */}
+      {schedulerStatus && (
+        <div className="flex items-center gap-4 text-xs text-zinc-500 mb-2">
+          <span className="flex items-center gap-1.5">
+            <span className={`inline-block w-2 h-2 rounded-full ${schedulerStatus.running ? 'bg-green-500' : 'bg-red-500'}`} />
+            Scheduler {schedulerStatus.running ? 'running' : 'stopped'}
+          </span>
+          <span>Heartbeat: {schedulerStatus.heartbeat_secs}s</span>
+          <span>Ticks: {schedulerStatus.total_ticks}</span>
+          <span>Total runs: {schedulerStatus.total_runs}</span>
+          {schedulerStatus.total_failures > 0 && (
+            <span className="text-red-400">Failures: {schedulerStatus.total_failures}</span>
+          )}
+          {schedulerStatus.last_tick_at && (
+            <span>Last tick: {new Date(schedulerStatus.last_tick_at).toLocaleTimeString()}</span>
+          )}
+        </div>
+      )}
+
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-zinc-500">
+          {list.length} schedule{list.length !== 1 ? 's' : ''} ({list.filter((s) => s.is_active).length} active)
+        </div>
+        <button
+          onClick={() => setShowCreate(true)}
+          className="text-xs text-white bg-blue-600 hover:bg-blue-500 rounded px-3 py-1.5"
+        >
+          + New Schedule
+        </button>
+      </div>
+
+      {isLoading && <p className="text-zinc-600 text-sm">Loading schedules...</p>}
+
+      <div className="border border-zinc-800 rounded-lg overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-zinc-900/50 text-zinc-500 text-xs uppercase tracking-wide">
+              <th className="text-left px-4 py-2 font-medium">Name</th>
+              <th className="text-left px-4 py-2 font-medium">Cron</th>
+              <th className="text-left px-4 py-2 font-medium">Next Run</th>
+              <th className="text-center px-4 py-2 font-medium">Runs</th>
+              <th className="text-center px-4 py-2 font-medium">Status</th>
+              <th className="text-right px-4 py-2 font-medium">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.length === 0 && !isLoading && (
+              <tr><td colSpan={6} className="text-center py-8 text-zinc-600">No schedules yet</td></tr>
+            )}
+            {list.map((s) => (
+              <tr key={s.id} className="border-t border-zinc-800/50 hover:bg-zinc-900/30">
+                <td className="px-4 py-2">
+                  <div className="text-zinc-300 text-sm">{s.name}</div>
+                  {s.natural_language && <div className="text-zinc-600 text-xs">{s.natural_language}</div>}
+                </td>
+                <td className="px-4 py-2 text-xs text-zinc-400 font-mono">{s.cron_expression}</td>
+                <td className="px-4 py-2 text-xs text-zinc-400">
+                  {s.next_run_at ? formatTimestamp(s.next_run_at) : '-'}
+                </td>
+                <td className="px-4 py-2 text-center text-xs text-zinc-500">
+                  {s.run_count}
+                  {s.error_count > 0 && <span className="text-red-400 ml-1">({s.error_count} err)</span>}
+                </td>
+                <td className="px-4 py-2 text-center">
+                  <span className={`inline-block w-2 h-2 rounded-full ${s.is_active ? 'bg-green-500' : 'bg-zinc-600'}`} />
+                </td>
+                <td className="px-4 py-2 text-right space-x-2">
+                  <button onClick={() => setViewingRuns(s.id)} className="text-xs text-blue-400 hover:text-blue-300">
+                    Runs
+                  </button>
+                  <button onClick={() => handleToggle(s.id, s.is_active)} className="text-xs text-yellow-400 hover:text-yellow-300">
+                    {s.is_active ? 'Pause' : 'Resume'}
+                  </button>
+                  <button onClick={() => handleDelete(s.id, s.name)} className="text-xs text-red-400 hover:text-red-300">
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {list.some((s) => s.last_error) && (
+        <div className="border border-red-900/50 rounded-lg p-4">
+          <h4 className="text-xs text-red-400 font-medium mb-2">Recent Errors</h4>
+          {list.filter((s) => s.last_error).map((s) => (
+            <div key={s.id} className="text-xs text-zinc-500 mb-1">
+              <span className="text-zinc-400">{s.name}:</span> <span className="text-red-400">{s.last_error}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Admin() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'audit' | 'retention' | 'skills'>('audit');
+  const [activeTab, setActiveTab] = useState<'audit' | 'retention' | 'skills' | 'schedules'>('audit');
   const [eventFilter, setEventFilter] = useState('');
   const [page, setPage] = useState(0);
   const pageSize = 50;
@@ -475,19 +765,24 @@ export default function Admin() {
       <div className="max-w-6xl mx-auto py-6 px-4">
         {/* Tabs */}
         <div className="flex gap-1 mb-6 border-b border-zinc-800">
-          {(['audit', 'retention', 'skills'] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`px-4 py-2 text-sm capitalize transition-colors border-b-2 -mb-px ${
-                activeTab === tab
-                  ? 'border-white text-white'
-                  : 'border-transparent text-zinc-500 hover:text-zinc-300'
-              }`}
-            >
-              {tab === 'audit' ? 'Audit Log' : tab === 'retention' ? 'Retention' : 'Skills'}
-            </button>
-          ))}
+          {(['audit', 'schedules', 'retention', 'skills'] as const).map((tab) => {
+            const labels: Record<string, string> = {
+              audit: 'Audit Log', schedules: 'Schedules', retention: 'Retention', skills: 'Skills',
+            };
+            return (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`px-4 py-2 text-sm transition-colors border-b-2 -mb-px ${
+                  activeTab === tab
+                    ? 'border-white text-white'
+                    : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                {labels[tab]}
+              </button>
+            );
+          })}
         </div>
 
         {activeTab === 'audit' && (
@@ -575,6 +870,8 @@ export default function Admin() {
             </div>
           </div>
         )}
+
+        {activeTab === 'schedules' && <SchedulesTab />}
 
         {activeTab === 'skills' && <SkillsTab />}
 

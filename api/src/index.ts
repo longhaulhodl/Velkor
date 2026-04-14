@@ -10,6 +10,7 @@ import { documentRoutes } from "./routes/documents.js";
 import { auditRoutes } from "./routes/audit.js";
 import { retentionRoutes } from "./routes/retention.js";
 import { skillsRoutes } from "./routes/skills.js";
+import { schedulesRoutes } from "./routes/schedules.js";
 import { wsApp, injectWebSocket } from "./routes/ws.js";
 import { CoreError } from "./lib/core-client.js";
 
@@ -58,6 +59,7 @@ api.route("/documents", documentRoutes);
 api.route("/audit", auditRoutes);
 api.route("/retention", retentionRoutes);
 api.route("/skills", skillsRoutes);
+api.route("/schedules", schedulesRoutes);
 
 app.route("/api/v1", api);
 

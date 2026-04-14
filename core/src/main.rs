@@ -18,6 +18,7 @@ pub struct AppState {
     pub doc_store: Option<Arc<DocumentStore>>,
     pub skill_store: SkillStoreHandle,
     pub retention_status: velkor_retention::RetentionStatusHandle,
+    pub scheduler_status: velkor_scheduler::SchedulerStatusHandle,
 }
 
 #[tokio::main]
@@ -324,6 +325,23 @@ async fn main() -> Result<()> {
         Arc::clone(&retention_status),
     );
 
+    // Start scheduler heartbeat background task
+    let scheduler_config = {
+        let sched = config.scheduling.as_ref();
+        velkor_scheduler::SchedulerConfig {
+            enabled: sched.map(|s| s.enabled).unwrap_or(true),
+            heartbeat_secs: sched.map(|s| s.heartbeat_interval_seconds).unwrap_or(60),
+            timezone: sched.and_then(|s| s.timezone.clone()),
+        }
+    };
+    let scheduler_status = velkor_scheduler::new_status_handle(&scheduler_config);
+    let _scheduler_handle = velkor_scheduler::spawn_scheduler_task(
+        pool.clone(),
+        scheduler_config,
+        Arc::clone(&runtime),
+        Arc::clone(&scheduler_status),
+    );
+
     let state = AppState {
         pool: pool.clone(),
         memory,
@@ -332,6 +350,7 @@ async fn main() -> Result<()> {
         doc_store,
         skill_store,
         retention_status,
+        scheduler_status,
     };
 
     // Build router

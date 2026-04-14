@@ -4,6 +4,7 @@ pub mod memory;
 pub mod documents;
 pub mod audit;
 pub mod retention;
+pub mod schedules;
 pub mod skills;
 pub mod users;
 
@@ -20,6 +21,7 @@ pub fn internal_router() -> Router<AppState> {
         .nest("/internal/documents", documents::router())
         .nest("/internal/audit", audit::router())
         .nest("/internal/retention", retention::router())
+        .nest("/internal/schedules", schedules::router())
         .nest("/internal/skills", skills::router())
         .nest("/internal/users", users::router())
 }

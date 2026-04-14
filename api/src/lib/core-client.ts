@@ -335,3 +335,58 @@ export async function deleteInstallableSkill(name: string): Promise<unknown> {
 export async function reloadInstallableSkills(): Promise<unknown> {
   return coreRequest("/internal/skills/reload", { method: "POST" });
 }
+
+// ---------------------------------------------------------------------------
+// Schedules
+// ---------------------------------------------------------------------------
+
+export async function listSchedules(userId?: string): Promise<unknown> {
+  const params = userId ? `?user_id=${userId}` : "";
+  return coreRequest(`/internal/schedules${params}`);
+}
+
+export async function getSchedule(id: string): Promise<unknown> {
+  return coreRequest(`/internal/schedules/${id}`);
+}
+
+export async function createSchedule(body: {
+  user_id: string;
+  agent_id?: string;
+  name: string;
+  description?: string;
+  cron_expression: string;
+  natural_language?: string;
+  task_prompt: string;
+  delivery_channel?: string;
+  delivery_target?: string;
+}): Promise<unknown> {
+  return coreRequest("/internal/schedules", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateSchedule(
+  id: string,
+  body: Record<string, unknown>
+): Promise<unknown> {
+  return coreRequest(`/internal/schedules/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteSchedule(id: string): Promise<void> {
+  await coreRequest(`/internal/schedules/${id}`, { method: "DELETE" });
+}
+
+export async function listScheduleRuns(
+  scheduleId: string,
+  limit = 50
+): Promise<unknown> {
+  return coreRequest(`/internal/schedules/${scheduleId}/runs?limit=${limit}`);
+}
+
+export async function getSchedulerStatus(): Promise<unknown> {
+  return coreRequest("/internal/schedules/status");
+}

@@ -132,6 +132,43 @@ export const api = {
   reloadInstallableSkills: () =>
     request<{ reloaded: number }>('/skills/reload', { method: 'POST' }),
 
+  // Schedules
+  listSchedules: () =>
+    request<ScheduleInfo[]>('/schedules'),
+
+  getSchedule: (id: string) =>
+    request<ScheduleInfo>(`/schedules/${id}`),
+
+  createSchedule: (body: {
+    name: string;
+    cron_expression: string;
+    task_prompt: string;
+    agent_id?: string;
+    description?: string;
+    natural_language?: string;
+    delivery_channel?: string;
+    delivery_target?: string;
+  }) =>
+    request<ScheduleInfo>('/schedules', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  updateSchedule: (id: string, body: Record<string, unknown>) =>
+    request<ScheduleInfo>(`/schedules/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  deleteSchedule: (id: string) =>
+    request<void>(`/schedules/${id}`, { method: 'DELETE' }),
+
+  listScheduleRuns: (scheduleId: string, limit = 50) =>
+    request<ScheduleRunInfo[]>(`/schedules/${scheduleId}/runs?limit=${limit}`),
+
+  getSchedulerStatus: () =>
+    request<SchedulerStatus>('/schedules/status'),
+
   // Audit
   searchAudit: async (params: {
     event_type?: string;
@@ -241,6 +278,51 @@ export interface SkillDetail {
   created_at?: string;
   last_used_at?: string | null;
   last_improved_at?: string | null;
+}
+
+export interface ScheduleInfo {
+  id: string;
+  user_id: string;
+  agent_id: string;
+  name: string;
+  description: string | null;
+  cron_expression: string;
+  natural_language: string | null;
+  task_prompt: string;
+  delivery_channel: string | null;
+  delivery_target: string | null;
+  is_active: boolean;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  run_count: number;
+  error_count: number;
+  last_error: string | null;
+  created_at: string;
+}
+
+export interface ScheduleRunInfo {
+  id: string;
+  schedule_id: string;
+  started_at: string;
+  completed_at: string | null;
+  status: string | null;
+  result_summary: string | null;
+  conversation_id: string | null;
+  tokens_used: number | null;
+  cost_usd: number | null;
+  error: string | null;
+}
+
+export interface SchedulerStatus {
+  enabled: boolean;
+  heartbeat_secs: number;
+  last_tick_at: string | null;
+  last_tick_due: number;
+  last_tick_executed: number;
+  total_ticks: number;
+  total_runs: number;
+  total_failures: number;
+  running: boolean;
 }
 
 export interface AuditEntry {
