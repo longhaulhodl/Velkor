@@ -256,3 +256,11 @@ export async function searchAudit(params: {
   }
   return coreRequest(`/internal/audit?${qs}`);
 }
+
+// ---------------------------------------------------------------------------
+// Retention
+// ---------------------------------------------------------------------------
+
+export async function getRetentionStatus(): Promise<unknown> {
+  return coreRequest("/internal/retention/status");
+}

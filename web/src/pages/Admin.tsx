@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { api, type AuditEntry } from '../lib/api';
+import { api, type AuditEntry, type RetentionStatus } from '../lib/api';
 
 const EVENT_TYPES = [
   '', // all
@@ -99,6 +99,12 @@ export default function Admin() {
         offset: page * pageSize,
       }),
     refetchInterval: 15000,
+  });
+
+  const { data: retention } = useQuery({
+    queryKey: ['retention-status'],
+    queryFn: () => api.getRetentionStatus(),
+    refetchInterval: 30000,
   });
 
   // Aggregate stats from current page
@@ -233,51 +239,68 @@ export default function Admin() {
 
         {activeTab === 'retention' && (
           <div className="space-y-6">
-            <div className="border border-zinc-800 rounded-lg p-6">
-              <h3 className="text-sm font-medium text-zinc-300 mb-4">Retention Policy</h3>
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <span className="text-zinc-500">Conversations</span>
-                  <p className="text-zinc-300 mt-1">365 days</p>
+            {!retention ? (
+              <p className="text-zinc-600 text-sm">Loading retention status...</p>
+            ) : (
+              <>
+                <div className="border border-zinc-800 rounded-lg p-6">
+                  <h3 className="text-sm font-medium text-zinc-300 mb-4">Retention Policy</h3>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="text-zinc-500">Conversations</span>
+                      <p className="text-zinc-300 mt-1">{retention.config.default_retention_days} days</p>
+                    </div>
+                    <div>
+                      <span className="text-zinc-500">Delete mode</span>
+                      <p className="text-zinc-300 mt-1">{retention.config.hard_delete ? 'Hard delete' : 'Soft delete'}</p>
+                    </div>
+                    <div>
+                      <span className="text-zinc-500">Sweep interval</span>
+                      <p className="text-zinc-300 mt-1">
+                        {retention.config.interval_secs >= 86400
+                          ? `${Math.round(retention.config.interval_secs / 86400)}d`
+                          : retention.config.interval_secs >= 3600
+                          ? `${Math.round(retention.config.interval_secs / 3600)}h`
+                          : `${retention.config.interval_secs}s`}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-zinc-500">Task status</span>
+                      <p className="mt-1 flex items-center gap-2">
+                        <span className={`inline-block w-2 h-2 rounded-full ${retention.running ? 'bg-green-500' : 'bg-red-500'}`} />
+                        <span className="text-zinc-300 text-sm">{retention.running ? 'Running' : 'Stopped'}</span>
+                      </p>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <span className="text-zinc-500">Memories</span>
-                  <p className="text-zinc-300 mt-1">No expiry</p>
-                </div>
-                <div>
-                  <span className="text-zinc-500">Documents</span>
-                  <p className="text-zinc-300 mt-1">No expiry</p>
-                </div>
-                <div>
-                  <span className="text-zinc-500">Audit logs</span>
-                  <p className="text-zinc-300 mt-1">2555 days (~7 years)</p>
-                </div>
-              </div>
-            </div>
 
-            <div className="border border-zinc-800 rounded-lg p-6">
-              <h3 className="text-sm font-medium text-zinc-300 mb-4">Auto-Purge</h3>
-              <div className="flex items-center gap-3">
-                <span className="inline-block w-2 h-2 rounded-full bg-green-500" />
-                <span className="text-sm text-zinc-300">Enabled</span>
-                <span className="text-xs text-zinc-600 ml-2">Schedule: hourly sweep</span>
-              </div>
-              <p className="text-xs text-zinc-600 mt-3">
-                Soft-deletes conversations older than the retention period.
-                Hard-delete is disabled for safety.
-              </p>
-            </div>
-
-            <div className="border border-zinc-800 rounded-lg p-6">
-              <h3 className="text-sm font-medium text-zinc-300 mb-4">Status</h3>
-              <p className="text-sm text-zinc-500">
-                Retention task is running. No conversations have been purged yet
-                (all conversations are within the retention window).
-              </p>
-              <p className="text-xs text-zinc-600 mt-2">
-                Check <button onClick={() => { setActiveTab('audit'); setEventFilter('retention.sweep'); }} className="text-zinc-400 underline hover:text-zinc-200">audit log</button> for sweep history.
-              </p>
-            </div>
+                <div className="border border-zinc-800 rounded-lg p-6">
+                  <h3 className="text-sm font-medium text-zinc-300 mb-4">Sweep History</h3>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="text-zinc-500">Total sweeps</span>
+                      <p className="text-zinc-300 mt-1">{retention.total_sweeps}</p>
+                    </div>
+                    <div>
+                      <span className="text-zinc-500">Total deleted</span>
+                      <p className="text-zinc-300 mt-1">{retention.total_deleted} conversations</p>
+                    </div>
+                    <div>
+                      <span className="text-zinc-500">Last sweep</span>
+                      <p className="text-zinc-300 mt-1">
+                        {retention.last_sweep_at
+                          ? new Date(retention.last_sweep_at).toLocaleString()
+                          : 'Not yet'}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-zinc-500">Last sweep deleted</span>
+                      <p className="text-zinc-300 mt-1">{retention.last_sweep_deleted} conversations</p>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>

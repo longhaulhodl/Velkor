@@ -1,8 +1,10 @@
 //! Velkor retention — background job that auto-deletes expired conversations
 //! and messages based on configured retention policies.
 
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use sqlx::PgPool;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tracing::{info, warn};
 
 /// Default retention period in days for conversations with no explicit policy.
@@ -27,6 +29,43 @@ impl Default for RetentionConfig {
             hard_delete: false,
         }
     }
+}
+
+/// Shared status of the retention background task.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RetentionStatus {
+    pub config: RetentionStatusConfig,
+    pub last_sweep_at: Option<DateTime<Utc>>,
+    pub last_sweep_deleted: u64,
+    pub total_sweeps: u64,
+    pub total_deleted: u64,
+    pub running: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RetentionStatusConfig {
+    pub interval_secs: u64,
+    pub default_retention_days: i64,
+    pub hard_delete: bool,
+}
+
+/// Thread-safe handle to retention status, shared with the rest of the app.
+pub type RetentionStatusHandle = Arc<RwLock<RetentionStatus>>;
+
+/// Create a new status handle with the given config.
+pub fn new_status_handle(config: &RetentionConfig) -> RetentionStatusHandle {
+    Arc::new(RwLock::new(RetentionStatus {
+        config: RetentionStatusConfig {
+            interval_secs: config.interval_secs,
+            default_retention_days: config.default_retention_days,
+            hard_delete: config.hard_delete,
+        },
+        last_sweep_at: None,
+        last_sweep_deleted: 0,
+        total_sweeps: 0,
+        total_deleted: 0,
+        running: true,
+    }))
 }
 
 /// Run the retention sweep once — soft-deletes expired conversations and their
@@ -82,8 +121,12 @@ pub async fn sweep(pool: &PgPool, config: &RetentionConfig) -> anyhow::Result<u6
 }
 
 /// Spawn the retention background task. Runs indefinitely, sweeping at the
-/// configured interval.
-pub fn spawn_retention_task(pool: PgPool, config: RetentionConfig) -> tokio::task::JoinHandle<()> {
+/// configured interval. Updates the shared status handle after each sweep.
+pub fn spawn_retention_task(
+    pool: PgPool,
+    config: RetentionConfig,
+    status: RetentionStatusHandle,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         info!(
             interval_secs = config.interval_secs,
@@ -102,6 +145,11 @@ pub fn spawn_retention_task(pool: PgPool, config: RetentionConfig) -> tokio::tas
             interval.tick().await;
             match sweep(&pool, &config).await {
                 Ok(count) => {
+                    let mut s = status.write().await;
+                    s.last_sweep_at = Some(Utc::now());
+                    s.last_sweep_deleted = count;
+                    s.total_sweeps += 1;
+                    s.total_deleted += count;
                     if count > 0 {
                         info!(expired = count, "Retention sweep completed");
                     }

@@ -8,6 +8,7 @@ import { conversationRoutes } from "./routes/conversations.js";
 import { memoryRoutes } from "./routes/memory.js";
 import { documentRoutes } from "./routes/documents.js";
 import { auditRoutes } from "./routes/audit.js";
+import { retentionRoutes } from "./routes/retention.js";
 import { wsApp, injectWebSocket } from "./routes/ws.js";
 import { CoreError } from "./lib/core-client.js";
 
@@ -54,6 +55,7 @@ api.route("/conversations", conversationRoutes);
 api.route("/memory", memoryRoutes);
 api.route("/documents", documentRoutes);
 api.route("/audit", auditRoutes);
+api.route("/retention", retentionRoutes);
 
 app.route("/api/v1", api);
 

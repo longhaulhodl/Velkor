@@ -15,6 +15,7 @@ pub struct AppState {
     pub audit: AuditLogger,
     pub runtime: Arc<AgentRuntime>,
     pub doc_store: Option<Arc<DocumentStore>>,
+    pub retention_status: velkor_retention::RetentionStatusHandle,
 }
 
 #[tokio::main]
@@ -241,14 +242,6 @@ async fn main() -> Result<()> {
         tools,
     ));
 
-    let state = AppState {
-        pool: pool.clone(),
-        memory,
-        audit,
-        runtime,
-        doc_store,
-    };
-
     // Start retention background task with config from YAML
     let retention_config = {
         let mut rc = velkor_retention::RetentionConfig::default();
@@ -257,14 +250,27 @@ async fn main() -> Result<()> {
                 rc.default_retention_days = days as i64;
             }
             if !ret.auto_purge {
-                // If auto_purge is disabled, set interval very high (effectively off)
-                rc.interval_secs = 86400 * 365;
+                rc.interval_secs = 86400 * 365; // effectively off
             }
             rc.hard_delete = false; // always soft-delete for safety
         }
         rc
     };
-    let _retention_handle = velkor_retention::spawn_retention_task(pool.clone(), retention_config);
+    let retention_status = velkor_retention::new_status_handle(&retention_config);
+    let _retention_handle = velkor_retention::spawn_retention_task(
+        pool.clone(),
+        retention_config,
+        Arc::clone(&retention_status),
+    );
+
+    let state = AppState {
+        pool: pool.clone(),
+        memory,
+        audit,
+        runtime,
+        doc_store,
+        retention_status,
+    };
 
     // Build router
     let app = routes::internal_router().with_state(state);

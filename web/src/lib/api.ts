@@ -84,6 +84,10 @@ export const api = {
   deleteDocument: (id: string) =>
     request<void>(`/documents/${id}`, { method: 'DELETE' }),
 
+  // Retention
+  getRetentionStatus: () =>
+    request<RetentionStatus>('/retention/status'),
+
   // Audit
   searchAudit: async (params: {
     event_type?: string;
@@ -143,6 +147,19 @@ export interface MemoryResult {
   confidence: number;
   score: number;
   created_at: string;
+}
+
+export interface RetentionStatus {
+  config: {
+    interval_secs: number;
+    default_retention_days: number;
+    hard_delete: boolean;
+  };
+  last_sweep_at: string | null;
+  last_sweep_deleted: number;
+  total_sweeps: number;
+  total_deleted: number;
+  running: boolean;
 }
 
 export interface AuditEntry {

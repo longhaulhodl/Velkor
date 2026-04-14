@@ -3,6 +3,7 @@ pub mod conversations;
 pub mod memory;
 pub mod documents;
 pub mod audit;
+pub mod retention;
 pub mod users;
 
 use axum::{routing::get, Json, Router};
@@ -17,6 +18,7 @@ pub fn internal_router() -> Router<AppState> {
         .nest("/internal/memory", memory::router())
         .nest("/internal/documents", documents::router())
         .nest("/internal/audit", audit::router())
+        .nest("/internal/retention", retention::router())
         .nest("/internal/users", users::router())
 }
 
