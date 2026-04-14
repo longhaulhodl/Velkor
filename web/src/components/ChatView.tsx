@@ -54,7 +54,7 @@ export default function ChatView() {
 
   const handleSend = () => {
     const text = input.trim();
-    if (!text || isStreaming) return;
+    if (!text) return;
 
     // If documents were uploaded, prepend references so the model knows about them
     let fullMessage = text;
@@ -193,7 +193,7 @@ export default function ChatView() {
           />
           <button
             onClick={handleSend}
-            disabled={!input.trim() || isStreaming}
+            disabled={!input.trim()}
             className="px-4 py-2 bg-white text-black rounded-xl text-sm font-medium hover:bg-zinc-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors self-end"
           >
             Send

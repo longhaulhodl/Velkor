@@ -10,6 +10,9 @@ const app = new Hono();
 // Node.js WebSocket adapter for Hono
 const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
 
+/** Maximum number of messages that can be queued while busy. */
+const MAX_QUEUE_SIZE = 10;
+
 /**
  * WebSocket chat endpoint.
  *
@@ -18,11 +21,17 @@ const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
  * 2. Server validates JWT from query param (WebSocket can't use headers easily)
  * 3. Client sends { type: "chat", content: "...", agent_id?: "...", conversation_id?: "..." }
  * 4. Server streams back: text chunks, tool status, done, or error
+ *
+ * If the server is busy processing a message, subsequent messages are queued
+ * (up to MAX_QUEUE_SIZE) and processed in FIFO order after the current stream
+ * completes.
  */
 app.get(
   "/ws",
   upgradeWebSocket((c) => {
     let user: AuthUser | null = null;
+    let busy = false;
+    const messageQueue: WsClientMessage[] = [];
 
     return {
       onOpen(_event: Event, ws: WSContext) {
@@ -57,20 +66,61 @@ app.get(
         }
 
         if (msg.type === "chat") {
-          await handleChat(ws, user, msg);
+          if (busy) {
+            // Queue the message instead of dropping it
+            if (messageQueue.length >= MAX_QUEUE_SIZE) {
+              sendJson(ws, {
+                type: "error",
+                message: `Message queue full (max ${MAX_QUEUE_SIZE}). Wait for the current response to finish.`,
+              });
+              return;
+            }
+            messageQueue.push(msg);
+            sendJson(ws, { type: "queued", position: messageQueue.length });
+            console.log(`[ws] Message queued (position ${messageQueue.length})`);
+            return;
+          }
+
+          await processMessage(ws, user!, msg);
         } else {
           sendJson(ws, { type: "error", message: `Unknown message type: ${(msg as { type: string }).type}` });
         }
       },
 
       onClose() {
-        // Cleanup if needed (e.g., remove from Redis connection registry)
+        // Clear the queue on disconnect
+        messageQueue.length = 0;
       },
 
       onError(event: Event) {
         console.error("WebSocket error:", event);
       },
     };
+
+    /**
+     * Process a chat message. Sets busy=true for the duration, then drains
+     * the queue when done.
+     */
+    async function processMessage(
+      ws: WSContext,
+      currentUser: AuthUser,
+      msg: WsClientMessage
+    ): Promise<void> {
+      busy = true;
+      try {
+        await handleChat(ws, currentUser, msg);
+      } finally {
+        busy = false;
+
+        // Drain the queue — process next message if any
+        if (messageQueue.length > 0) {
+          const next = messageQueue.shift()!;
+          console.log(`[ws] Processing queued message: ${next.content.slice(0, 80)}`);
+          // Don't await — let it run in the event loop so onMessage can still receive
+          processMessage(ws, currentUser, next);
+        }
+      }
+    }
   })
 );
 

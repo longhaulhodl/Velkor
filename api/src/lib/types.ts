@@ -21,4 +21,5 @@ export type WsServerMessage =
   | { type: "tool_status"; tool: string; status: "started" | "completed" | "failed" }
   | { type: "done"; request_id: string; iterations: number; usage: { input_tokens: number; output_tokens: number } }
   | { type: "error"; message: string }
-  | { type: "conversation_created"; conversation_id: string };
+  | { type: "conversation_created"; conversation_id: string }
+  | { type: "queued"; position: number };

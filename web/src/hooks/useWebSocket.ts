@@ -12,6 +12,7 @@ interface WsMessage {
   conversation_id?: string;
   error?: string;
   message?: string;
+  position?: number;
 }
 
 export function useWebSocket() {
@@ -26,6 +27,7 @@ export function useWebSocket() {
     setStreaming,
     setConversationId,
     setError,
+    isStreaming,
   } = useChatStore();
 
   const connect = useCallback(() => {
@@ -79,6 +81,10 @@ export function useWebSocket() {
         case 'conversation_created':
           if (msg.conversation_id) setConversationId(msg.conversation_id);
           break;
+        case 'queued':
+          // Message was queued server-side — keep isStreaming true, nothing to reset
+          console.log(`[Velkor] Message queued at position ${msg.position}`);
+          break;
         case 'error':
           setError(msg.error ?? msg.message ?? 'Unknown error');
           setStreaming(false);
@@ -106,9 +112,15 @@ export function useWebSocket() {
         conversation_id: conversationId ?? undefined,
       });
 
-      setStreaming(true);
-      setError(null);
-      clearActiveTools();
+      // Only reset streaming state if we're not currently streaming.
+      // If we ARE streaming, the server will queue this message and
+      // process it after the current response finishes — we don't want
+      // to wipe the in-progress streaming text.
+      if (!isStreaming) {
+        setStreaming(true);
+        setError(null);
+        clearActiveTools();
+      }
 
       const ws = wsRef.current;
 
@@ -126,7 +138,7 @@ export function useWebSocket() {
         connect();
       }
     },
-    [connect, setStreaming, setError, clearActiveTools]
+    [connect, setStreaming, setError, clearActiveTools, isStreaming]
   );
 
   const disconnect = useCallback(() => {
