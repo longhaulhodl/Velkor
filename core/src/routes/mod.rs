@@ -8,7 +8,9 @@ pub mod retention;
 pub mod schedules;
 pub mod skills;
 pub mod tasks;
+pub mod triggers;
 pub mod users;
+pub mod webhooks;
 
 use axum::{routing::get, Json, Router};
 use crate::AppState;
@@ -27,7 +29,10 @@ pub fn internal_router() -> Router<AppState> {
         .nest("/internal/schedules", schedules::router())
         .nest("/internal/skills", skills::router())
         .nest("/internal/tasks", tasks::router())
+        .nest("/internal/triggers", triggers::router())
         .nest("/internal/users", users::router())
+        // Public webhook intake — NOT under /internal/, callable by external systems
+        .nest("/webhooks", webhooks::router())
 }
 
 async fn health() -> Json<serde_json::Value> {

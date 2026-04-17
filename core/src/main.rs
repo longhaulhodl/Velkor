@@ -445,6 +445,16 @@ async fn main() -> Result<()> {
         maintenance::MemoryMaintenanceSubsystem::new(pool.clone(), pulse_interval_secs),
     ));
 
+    // Subsystem 4: File-watch trigger scanning (runs every tick)
+    pulse.register(Box::new(
+        velkor_triggers::FileWatchSubsystem::new(pool.clone()),
+    ));
+
+    // Subsystem 5: Trigger event processor — drains trigger_events queue
+    pulse.register(Box::new(
+        velkor_triggers::EventProcessorSubsystem::new(pool.clone(), Arc::clone(&runtime)),
+    ));
+
     // Spawn the unified pulse engine
     let _pulse_handle = pulse.spawn();
 
@@ -513,7 +523,13 @@ async fn main() -> Result<()> {
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{core_port}")).await?;
     tracing::info!("Velkor core API listening on port {core_port}");
 
-    axum::serve(listener, app).await?;
+    // into_make_service_with_connect_info lets webhook handlers see the caller's IP
+    // via ConnectInfo<SocketAddr> (used for source_ip + future IP allowlists).
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }

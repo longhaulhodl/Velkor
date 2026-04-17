@@ -1241,6 +1241,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "glob"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
+
+[[package]]
 name = "group"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3716,6 +3722,7 @@ dependencies = [
  "velkor-security",
  "velkor-skills",
  "velkor-tools",
+ "velkor-triggers",
 ]
 
 [[package]]
@@ -3986,6 +3993,30 @@ dependencies = [
  "velkor-memory",
  "velkor-models",
  "velkor-skills",
+]
+
+[[package]]
+name = "velkor-triggers"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "glob",
+ "hex",
+ "hmac",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "subtle",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+ "velkor-pulse",
+ "velkor-runtime",
 ]
 
 [[package]]
